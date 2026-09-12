@@ -1,0 +1,66 @@
+plugins {
+     id 'com.android.application'
+}
+
+def buildWithCMake = project.hasProperty('BUILD_WITH_CMAKE');
+def releaseKeystore = System.getenv('SKATE3_RELEASE_KEYSTORE')
+def releaseStorePassword = System.getenv('SKATE3_RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('SKATE3_RELEASE_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('SKATE3_RELEASE_KEY_PASSWORD')
+
+android {
+    namespace = "io.skate3port.game"
+    compileSdkVersion 35
+    ndkVersion = "27.2.12479018"
+    signingConfigs {
+        if (releaseKeystore && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+    defaultConfig {
+        applicationId "io.skate3port.game"
+        minSdkVersion 33
+        targetSdkVersion 35
+        versionCode 20024
+        versionName "2.0.18"
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-debug"
+        }
+        qa {
+            initWith debug
+            applicationIdSuffix ".qa"
+            versionNameSuffix "-qa7"
+            signingConfig signingConfigs.debug
+            matchingFallbacks = ["debug"]
+        }
+        release {
+            minifyEnabled false
+            if (signingConfigs.findByName('release') != null) {
+                signingConfig signingConfigs.release
+            }
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    sourceSets.main { jniLibs.srcDir 'libs' }
+    packagingOptions {
+        jniLibs {
+            // AdrenoTools needs extracted hook libraries in nativeLibraryDir.
+            useLegacyPackaging true
+        }
+    }
+    lint {
+        abortOnError = false
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+}

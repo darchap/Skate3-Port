@@ -1,0 +1,30 @@
+# --- Retail game data and title update: never commit ---
+/game/
+/TU_*
+*.iso
+*.7z
+
+# --- Build outputs ---
+/out/
+/generated/
+/build/
+/android/app/libs/
+/android/app/build/
+/android/build/
+.gradle/
+/android/local.properties
+/android/*.keystore
+/third_party/rexglue-sdk/out/
+
+# --- IDE / OS noise ---
+/.vs/
+/.idea/
+*.user
+*.swp
+.DS_Store
+Thumbs.db
+__pycache__/
+
+# --- Vendored SDK extras not needed by our build ---
+# PowerPC binutils (131 MB of .exe) are only used by the SDK's own PPC test pipeline.
+/third_party/rexglue-sdk/tools/binutils/

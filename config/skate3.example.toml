@@ -1,0 +1,86 @@
+# Optional developer override file.
+#
+# To override cvars locally, copy this file beside skate3.exe as skate3.toml
+# and edit values there. Release builds do not require this file.
+
+log_verbose = false
+log_level = "info"
+
+protect_zero = false
+
+audio_maxqframes = 16
+audio_worker_thread_priority = 0
+
+input_backend = "xinput"
+mnk_mode = false
+mnk_capture_mouse = false
+
+fullscreen = true
+# Ultrawide (native renderer): true widescreen rendering at the host display
+# aspect, derived from the fullscreen monitor on Windows or from an explicit
+# window_width/window_height pair. The emulated renderer presents 16:9
+# pillarboxed. skate3_ultrawide_target_aspect (default 0 = derive at boot)
+# pins the aspect explicitly.
+skate3_ultrawide = false
+skate3_field_of_view = 60.0
+# window_width = 3440
+# window_height = 1440
+vsync = false
+video_mode_refresh_rate = 60.0
+resolution_scale = 2
+draw_resolution_scale_x = 2
+draw_resolution_scale_y = 2
+d3d12_allow_variable_refresh_rate_and_tearing = true
+d3d12_strict_vsync_present = false
+d3d12_frame_latency_waitable_object = false
+d3d12_max_frame_latency = 1
+d3d12_present_frame_limiter = false
+d3d12_present_frame_limiter_fps = 120.0
+d3d12_present_frame_limiter_sleep_margin_us = 1000
+d3d12_present_frame_limiter_spin_us = 150
+
+vblank_host_clock_pacing = false
+vblank_precise_sleep_margin_us = 1000
+vblank_precise_spin_us = 150
+host_present_from_non_ui_thread = true
+presenter_strict_guest_output_backpressure = false
+presenter_strict_guest_output_backpressure_timeout_ms = 100
+vulkan_async_placeholder_max_consecutive_skips = 120
+# Push descriptors were added as a CPU-side optimization in v1.0.4, but some
+# drivers may handle them slowly enough to starve the GPU.
+vulkan_push_constants_descriptors = false
+# New Vulkan resolve-clear deferral can improve some drivers, but has caused
+# frame-time regressions on others. Leave disabled unless testing it explicitly.
+vulkan_deferred_resolve_clears = false
+# Scaled-resolve texture load fast paths introduced in v1.0.4 can be faster on
+# some drivers, but they increase pressure on scaled resolve buffers and have
+# been implicated in severe frame-time regressions on others. Off by default
+# (matching the code default); enable only to test on a known-good driver.
+vulkan_texel_buffer_texture_loads = false
+vulkan_storage_image_texture_loads = false
+
+present_letterbox = true
+present_safe_area_x = 100
+present_safe_area_y = 100
+present_effect = "bilinear"
+
+readback_memexport = false
+anisotropic_override = -1
+texture_cache_memory_limit_render_to_texture = 128
+texture_cache_memory_limit_soft = 2048
+texture_cache_memory_limit_hard = 4096
+texture_cache_memory_limit_soft_lifetime = 300
+gpu_allow_invalid_fetch_constants = true
+clear_memory_page_state = false
+execute_unclipped_draw_vs_on_cpu = true
+occlusion_query_enable = true
+
+advanced_settings_overlay_enabled = true
+
+selected_user_profile = "player"
+user_profile_name = "Player"
+user_profile_xuid = "B13E07DFF9AB6772"
+user_profile_signed_in = true
+user_live_signed_in = false
+
+game_data_root = ""
