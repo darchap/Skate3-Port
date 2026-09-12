@@ -10,6 +10,7 @@
  */
 
 #include <algorithm>
+#include <chrono>
 
 #include <rex/assert.h>
 #include <rex/audio/audio_driver.h>
@@ -39,6 +40,17 @@ REXCVAR_DEFINE_INT32(audio_worker_thread_priority, 1, "Audio",
                      "~5.3 ms deadline; above-normal keeps it scheduled ahead of the busy "
                      "emulation threads to avoid underrun crackle.")
     .range(-2, 2);
+
+REXCVAR_DEFINE_BOOL(
+    audio_paced_credit_dispatch, true, "Audio",
+    "Dispatch guest audio-frame credits at an even 5.33 ms cadence instead of in "
+    "device-callback bursts. The guest XAudio DAC drains its cross-thread command "
+    "queue only inside a credited batch, so burst-granted credits make the guest "
+    "mixer's buffer resubmits land after every drain of the burst and wait a full "
+    "device callback period (~13-17 ms measured) for execution - the rhythmic "
+    "crackle's root cause. Post-stall catch-up is bounded to ~2x real time, "
+    "matching the guest DAC's own 2-batch catch-up cap.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 namespace {
 
@@ -148,6 +160,10 @@ void AudioSystem::WorkerThreadMain() {
 
   // Main run loop.
   uint32_t diag_pump_count = 0;
+  // [AUDIO FIX] Credit-dispatch pacing (see audio_paced_credit_dispatch).
+  // 256 samples @ 48 kHz = 5.333 ms per credit; one deadline per client.
+  constexpr uint64_t kCreditPeriodNs = 256ull * 1000000000ull / 48000ull;
+  uint64_t next_dispatch_ns[kMaximumClientCount] = {};
   while (worker_running_) {
     // These handles signify the number of submitted samples. Once we reach
     // 64 samples, we wait until our audio backend releases a semaphore
@@ -191,6 +207,26 @@ void AudioSystem::WorkerThreadMain() {
                        client_callback, client_callback_arg, index);
         }
         SCOPE_profile_cpu_i("apu", "rex::audio::AudioSystem->client_callback");
+        if (REXCVAR_GET(audio_paced_credit_dispatch)) {
+          const auto now_fn = [] {
+            return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now().time_since_epoch())
+                                .count());
+          };
+          uint64_t now = now_fn();
+          if (now < next_dispatch_ns[index]) {
+            // Inside the current credit slot: wait it out. Bounded by one slot
+            // (<=5.33 ms), holds no locks; pause/shutdown latency +<=5.33 ms.
+            rex::thread::Sleep(
+                std::chrono::microseconds((next_dispatch_ns[index] - now) / 1000 + 1));
+            now = now_fn();
+          }
+          // Advance one period; let the deadline lag 'now' by at most half a
+          // period. That bounds sustained post-stall catch-up to ~2x real time
+          // and prevents bursts from re-forming.
+          const uint64_t floor_ns = now > kCreditPeriodNs / 2 ? now - kCreditPeriodNs / 2 : 0;
+          next_dispatch_ns[index] = std::max(next_dispatch_ns[index] + kCreditPeriodNs, floor_ns);
+        }
         uint64_t args[] = {client_callback_arg};
         function_dispatcher_->Execute(worker_thread_->thread_state(), client_callback, args,
                                       rex::countof(args));
