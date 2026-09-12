@@ -130,6 +130,7 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   bool audio_mute_ = false;
   bool rumble_ = true;
   bool penguin_mod_ = false;
+  bool auto_boot_ = false;
   float mnk_sensitivity_ = 1.0f;
   int chord_index_ = 0;
   int input_backend_index_ = 0;

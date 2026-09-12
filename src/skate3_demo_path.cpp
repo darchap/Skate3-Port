@@ -25,13 +25,24 @@
 #include <Windows.h>
 #endif
 
+#if defined(__ANDROID__)
+REXCVAR_DEFINE_BOOL(skate3_demo_path, true, "Skate 3",
+                    "Probe and automate the boot path to gameplay");
+#else
 REXCVAR_DEFINE_BOOL(skate3_demo_path, false, "Skate 3",
                     "Probe and automate the boot path to gameplay");
+#endif
 REXCVAR_DEFINE_BOOL(skate3_demo_path_probe, false, "Skate 3",
                     "Log Skate 3 boot/frontend states used by the demo path");
+#if defined(__ANDROID__)
+REXCVAR_DEFINE_BOOL(skate3_demo_path_signed_in, true, "Skate 3",
+                    "Demo path: keep the real signed-in profile (and its save) instead of "
+                    "forcing a signed-out boot");
+#else
 REXCVAR_DEFINE_BOOL(skate3_demo_path_signed_in, false, "Skate 3",
                     "Demo path: keep the real signed-in profile (and its save) instead of "
                     "forcing a signed-out boot");
+#endif
 REXCVAR_DEFINE_STRING(skate3_demo_path_gameplay_inputs, "", "Skate 3",
                       "Demo path: comma-separated pad inputs injected once after gameplay "
                       "settles (tokens: a b x y start back lb rb lt rt up down left right l3 "

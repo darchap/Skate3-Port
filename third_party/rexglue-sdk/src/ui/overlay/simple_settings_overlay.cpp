@@ -62,7 +62,7 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 27> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 28> kOptionalSimpleSettingsCvars = {
     "skate3_native_render_scene",
     "skate3_native_render_scene_msaa",
     "skate3_native_render_scene_shadows",
@@ -89,7 +89,8 @@ constexpr std::array<std::string_view, 27> kOptionalSimpleSettingsCvars = {
     "user_language",
     "skate3_penguin_mod",
     "skate3_display_aspect_mode",
-    "skate3_android_quality_profile"};
+    "skate3_android_quality_profile",
+    "skate3_demo_path"};
 
 // MSAA sample counts for the native scene renderer.
 constexpr std::array<const char*, 4> kMsaaLabels = {"Off", "2x", "4x", "8x"};
@@ -1106,6 +1107,7 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
   rumble_ = HasCvar("hid_rumble_enabled") && rex::cvar::Query<bool>("hid_rumble_enabled");
   penguin_mod_ = HasCvar("skate3_penguin_mod") &&
                  rex::cvar::Query<bool>("skate3_penguin_mod");
+  auto_boot_ = HasCvar("skate3_demo_path") && rex::cvar::Query<bool>("skate3_demo_path");
   mnk_sensitivity_ = HasCvar("mnk_sensitivity")
                          ? float(std::clamp(rex::cvar::Query<double>("mnk_sensitivity"), 0.1, 5.0))
                          : 1.0f;
@@ -2191,6 +2193,29 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
               std::clamp(int(CvarDefaultDouble("user_language", 1.0)), 1,
                          static_cast<int>(kLanguageLabels.size())) -
               1;
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_demo_path")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Auto-Boot to Gameplay";
+        row.desc =
+            "Skip the intro movie, the press-start screen and the profile "
+            "prompts on the next launch and drop straight into the world with "
+            "your save loaded. The game presses the buttons itself, then stops "
+            "sending them the moment gameplay starts. Takes effect next launch.";
+        row.value_note = "Applies from the next launch";
+        row.options = {"Off", "On"};
+        row.flag = &auto_boot_;
+        row.on_enum_change = [this](int value) {
+          SetBoolCvar("skate3_demo_path", value != 0);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          auto_boot_ = CvarDefaultBool("skate3_demo_path", false);
+          SetBoolCvar("skate3_demo_path", auto_boot_);
+          SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));
       }
