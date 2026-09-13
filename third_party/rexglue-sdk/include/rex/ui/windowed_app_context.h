@@ -17,6 +17,7 @@
 #include <thread>
 
 #include <rex/assert.h>
+#include <rex/ui/app_lifecycle_listener.h>
 
 namespace rex {
 namespace ui {
@@ -118,8 +119,15 @@ class WindowedAppContext {
     CallInUIThreadDeferred([this] { QuitFromUIThread(); });
   }
 
+  // Mobile lifecycle events, invoked on the UI thread. Clear before destruction.
+  void SetAppLifecycleListener(AppLifecycleListener* listener) {
+    app_lifecycle_listener_ = listener;
+  }
+
  protected:
   WindowedAppContext() : ui_thread_id_(std::this_thread::get_id()) {}
+
+  AppLifecycleListener* app_lifecycle_listener_ = nullptr;
 
   // Can be called from any thread (including the UI thread) to ask the OS to
   // run an iteration of the UI loop (with or without processing internal UI

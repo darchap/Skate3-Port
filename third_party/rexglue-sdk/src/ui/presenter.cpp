@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <rex/thread.h>
 #include <cmath>
 #include <utility>
 
@@ -20,6 +21,7 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
+#include <rex/ui/android_background_state.h>
 #include <rex/ui/presenter.h>
 #include <rex/ui/window.h>
 
@@ -449,6 +451,19 @@ void Presenter::PaintFromUIThread(bool force_paint) {
   // OS (which will still be live even if the window goes outside any monitor).
   // But a surface check still won't cause harm, for simplicity.
   if (!InSurfaceOnMonitorFromUIThread()) {
+    // Same latch: the surface is briefly absent on every Android foreground.
+    ui_thread_paint_requested_.store(false, std::memory_order_relaxed);
+    return;
+  }
+  // Backgrounded on Android: the ANativeWindow is gone. Clear the paint latch
+  // on the way out or no later paint is ever requested (black screen).
+  if (IsAppBackgrounded()) {
+    // Clear the pending-paint latch on the way out. Returning with it still
+    // set would make every later RequestPaintOrConnectionRecoveryViaWindow see
+    // "a paint is already pending" and never ask the window to paint again -
+    // the guest would keep rendering into a screen that is never presented
+    // (black screen after resume). The resume path requests a fresh paint.
+    ui_thread_paint_requested_.store(false, std::memory_order_relaxed);
     return;
   }
 
@@ -544,6 +559,11 @@ void Presenter::PaintFromUIThread(bool force_paint) {
   // with the current Presenter.
   if (paint_result == PaintResult::kGpuLostExternally ||
       paint_result == PaintResult::kGpuLostResponsible) {
+    if (IsAppBackgrounded()) {
+      // Presenting raced the surface teardown; recoverable, rebuilt on foreground.
+      REXLOG_WARN("Presenter: ignoring GPU loss reported while backgrounded");
+      return;
+    }
     if (host_gpu_loss_callback_) {
       host_gpu_loss_callback_(paint_result == PaintResult::kGpuLostResponsible, true);
     }
@@ -716,8 +736,9 @@ bool Presenter::RefreshGuestOutput(
         RequestPaintOrConnectionRecoveryViaWindow(true);
         break;
       case PaintMode::kGuestOutputThreadImmediately:
-        // Both painting and window paint requesting are accessible.
-        if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable) {
+        // No presenting while backgrounded; the mailbox keeps the frame for resume.
+        if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable &&
+            !IsAppBackgrounded()) {
           paint_result = PaintAndPresent(false);
           if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
             RequestPaintOrConnectionRecoveryViaWindow(true);
@@ -729,11 +750,25 @@ bool Presenter::RefreshGuestOutput(
   // Handle GPU loss when not in the middle of the function anymore, and
   // lifecycle management from the GPU loss callback is fine on the UI thread.
   if (host_gpu_loss_callback_) {
-    if (paint_result == PaintResult::kGpuLostResponsible) {
-      host_gpu_loss_callback_(true, false);
-    } else if (paint_result == PaintResult::kGpuLostExternally) {
-      host_gpu_loss_callback_(false, false);
+    if (paint_result == PaintResult::kGpuLostResponsible ||
+        paint_result == PaintResult::kGpuLostExternally) {
+      if (IsAppBackgrounded()) {
+        // Same race as above, reported from the guest thread; recoverable.
+        REXLOG_WARN("Presenter: ignoring GPU loss reported while backgrounded (guest thread)");
+      } else if (paint_result == PaintResult::kGpuLostResponsible) {
+        host_gpu_loss_callback_(true, false);
+      } else {
+        host_gpu_loss_callback_(false, false);
+      }
     }
+  }
+
+  if (IsAppBackgrounded()) {
+    // No present while backgrounded, and presenting was the only pacing: sleep a
+    // frame so the guest loop does not free-run (4.63 -> 3.46 cores). Parking here
+    // instead was tried and gained nothing: the guest render thread never reaches
+    // this point.
+    rex::thread::Sleep(std::chrono::milliseconds(33));
   }
 
   return is_active;

@@ -24,6 +24,10 @@ class IAudioSystem {
   virtual ~IAudioSystem() = default;
   virtual X_STATUS Setup(KernelState* kernel_state) = 0;
   virtual void Shutdown() = 0;
+
+  // Pause/resume while the app is backgrounded on mobile. No-op by default.
+  virtual void Pause() {}
+  virtual void Resume() {}
 };
 
 }  // namespace rex::system

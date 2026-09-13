@@ -29,6 +29,9 @@ int main(int argc, char** argv) {
   // initialized; setting this later leaves HIDAPI_JoystickDetect in every
   // event pump even though no HID controller is used.
   SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI, "0", SDL_HINT_OVERRIDE);
+  // Keep the UI thread pumping while backgrounded: a parked UI thread deadlocks
+  // every CallInUIThreadSynchronous. Pausing is done by the lifecycle listener.
+  SDL_SetHintWithPriority(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0", SDL_HINT_OVERRIDE);
 #endif
 
 #if REX_PLATFORM_MAC

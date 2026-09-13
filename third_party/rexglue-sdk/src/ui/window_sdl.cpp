@@ -586,6 +586,13 @@ void SDLWindow::HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
     case SDL_EVENT_WINDOW_METAL_VIEW_RESIZED:
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+#if REX_PLATFORM_ANDROID
+      // A resize accompanies every new ANativeWindow; rebuild the presenter surface
+      // if the foreground event arrived before the surface existed.
+      if (presenter() && !HasPresenterSurface()) {
+        NotifySurfaceChanged(true);
+      }
+#endif
       HandleSizeUpdate(destruction_receiver);
       break;
     case SDL_EVENT_WINDOW_FOCUS_GAINED:

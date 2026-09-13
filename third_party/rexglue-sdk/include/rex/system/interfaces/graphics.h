@@ -58,6 +58,10 @@ class IGraphicsSystem {
   }
 
   virtual void Shutdown() = 0;
+
+  // Mobile background gate: stops the vblank source so the guest frame loop
+  // parks, without suspending any host thread. No-op by default.
+  virtual void SetBackgroundPaused(bool paused) { (void)paused; }
 };
 
 }  // namespace rex::system

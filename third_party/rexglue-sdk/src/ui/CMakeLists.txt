@@ -2,6 +2,7 @@
 
 # Core UI sources
 set(REXUI_CORE_SOURCES
+    android_background_state.cpp
     fonts_inter.cpp
     graphics_device_list.cpp
     graphics_upload_buffer_pool.cpp

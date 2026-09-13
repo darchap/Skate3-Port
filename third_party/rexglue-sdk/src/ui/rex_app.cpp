@@ -13,6 +13,7 @@
 
 #include <rex/chrono/clock.h>
 #include <rex/cvar.h>
+#include <rex/ui/android_background_state.h>
 #include <rex/ui/flags.h>
 #include <rex/kernel/crt/heap.h>
 #include <rex/filesystem.h>
@@ -663,6 +664,7 @@ bool ReXApp::SetupPresentation() {
 
   window_->AddListener(this);
   window_->AddInputListener(this, 0);
+  app_context().SetAppLifecycleListener(this);
 
   if (REXCVAR_GET(fullscreen)) {
     window_->SetFullscreen(true);
@@ -824,6 +826,62 @@ void ReXApp::OnKeyDown(ui::KeyEvent& e) {
   rex::ui::ProcessKeyEvent(e);
 }
 
+void ReXApp::OnAppEnterBackground() {
+  REXLOG_INFO("App backgrounded: pausing audio and the vblank source");
+  if (runtime_) {
+    if (runtime_->audio_system()) {
+      runtime_->audio_system()->Pause();
+    }
+    if (runtime_->graphics_system()) {
+      // Gate vblank only: the guest frame loop parks by itself. Suspending guest
+      // threads was tried and removed (no gain, slow motion on resume).
+      runtime_->graphics_system()->SetBackgroundPaused(true);
+    }
+  }
+  // Do not detach the presenter surface here: the ANativeWindow is already gone
+  // and swapchain retirement would wait forever on GPU fences.
+}
+
+void ReXApp::OnAppEnterForeground() {
+  REXLOG_INFO("App foregrounded: rebuilding the surface, resuming audio");
+  // Rebuild the presenter surface from the new ANativeWindow (no-op if it does
+  // not exist yet; the RESIZED that follows retries).
+  if (window_) {
+    window_->NotifySurfaceChanged(true);
+  }
+  // Cleared here, on the UI thread after the rebuild, never in onResume():
+  // presenting must not restart while the old surface is still held.
+  ui::SetAppBackgrounded(false);
+  if (window_) {
+    // The guest only asks for a present with its next frame; kick one now.
+    window_->RequestPresenterUIPaintFromUIThread();
+  }
+  if (runtime_) {
+    if (runtime_->graphics_system()) {
+      runtime_->graphics_system()->SetBackgroundPaused(false);
+    }
+    if (runtime_->audio_system()) {
+      runtime_->audio_system()->Resume();
+    }
+  }
+  REXLOG_INFO("App foregrounded: done (surface: {})",
+              window_ && window_->HasPresenterSurface());
+}
+
+void ReXApp::OnAppTerminating() {
+  REXLOG_INFO("App terminating");
+  // Undo the pause only. No surface rebuild: the window is gone for good and
+  // swapchain work would hang on fences that never signal.
+  if (runtime_) {
+    if (runtime_->graphics_system()) {
+      runtime_->graphics_system()->SetBackgroundPaused(false);
+    }
+    if (runtime_->audio_system()) {
+      runtime_->audio_system()->Resume();
+    }
+  }
+}
+
 void ReXApp::OnClosing(ui::UIEvent& e) {
   (void)e;
   REXLOG_INFO("Window closing, shutting down...");
@@ -841,6 +899,7 @@ void ReXApp::OnClosing(ui::UIEvent& e) {
 }
 
 void ReXApp::OnDestroy() {
+  app_context().SetAppLifecycleListener(nullptr);
   // Notify subclass before cleanup
   OnShutdown();
 
