@@ -81,6 +81,10 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_fmv_yield);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_hdr);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_hdr_packed);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_handheld_potato);
+REXCVAR_DECLARE(bool, skate3_native_render_scene_vegetation);
+REXCVAR_DECLARE(bool, skate3_native_render_scene_ambient_npcs);
+REXCVAR_DECLARE(bool, skate3_native_render_scene_movable_props);
+REXCVAR_DECLARE(bool, skate3_native_render_scene_clutter_detail);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lightmaps);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lm_dump);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_loading_native);
@@ -4966,12 +4970,19 @@ void ProcessPrewarmEntry(uint8_t* base, const PrewarmEntry& e) {
     }
     return;
   }
-  if (REXCVAR_GET(skate3_native_render_scene_handheld_potato)) {
-    const bool drop = item.env_family == 7 || item.env_family == 9 ||
-                      item.env_family == 10 || item.transparent ||
-                      item.env_family == 13 || item.char_family == 3 ||
-                      item.char_family == 6 || item.char_family == 7 ||
-                      item.dynobj != 0;
+  {
+    // Mirrors HandheldPotatoDrops: every content cut follows its own setting.
+    const bool vegetation = item.env_family == 7 || item.env_family == 9 ||
+                            item.env_family == 10 || item.transparent ||
+                            item.env_family == 13;
+    const bool ambient_npc = item.char_family == 3 || item.char_family == 5 ||
+                             item.char_family == 6 || item.char_family == 7 ||
+                             item.dynobj != 0;
+    const bool drop =
+        (vegetation && !REXCVAR_GET(skate3_native_render_scene_vegetation)) ||
+        (ambient_npc && !REXCVAR_GET(skate3_native_render_scene_ambient_npcs)) ||
+        (item.dynobj != 0 &&
+         !REXCVAR_GET(skate3_native_render_scene_movable_props));
     if (drop) {
       // Count this registration as completed without allocating any GPU
       // buffers or staging textures. The live capture/build path applies
@@ -4981,17 +4992,6 @@ void ProcessPrewarmEntry(uint8_t* base, const PrewarmEntry& e) {
       std::lock_guard<std::mutex> lock(g_prewarm_out_mutex);
       g_prewarm_out.push_back(std::move(res));
       return;
-    }
-    if (item.char_family == 0 && !item.water) {
-      item.lightmap_tex = 0;
-      item.macro_tex = 0;
-      item.detail_tex = 0;
-      item.spec_tex = 0;
-      item.decal_art = 0;
-      item.decal = false;
-      item.decal_tileable = false;
-      std::memset(item.diffuse_fetch, 0, sizeof(item.diffuse_fetch));
-      std::memset(item.decal_fetch, 0, sizeof(item.decal_fetch));
     }
   }
   // One representative draw entry so DecodeMesh's two-sided-sheet detection
@@ -9351,8 +9351,10 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     if (lightmap == &g_r.white) {
       lightmap = nullptr;
     }
+    // Base-colour-only world (lightmaps off): feed the shared neutral
+    // lightmap so world geometry stays lit instead of going flat.
     if (lightmap == nullptr &&
-        REXCVAR_GET(skate3_native_render_scene_handheld_potato) &&
+        !REXCVAR_GET(skate3_native_render_scene_lightmaps) &&
         item.char_family == 0 && !item.unlit && !item.water) {
       lightmap = &g_r.neutral_lightmap;
     }
@@ -10548,11 +10550,10 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
       stamp_route(4);
       continue;
     }
-    // Screen-size-biased clutter LOD for the aggressive handheld profile.
-    // Preserve large surfaces and nearby skate geometry; progressively
-    // discard tiny static props whose complete draw/material setup resolves
-    // to only a handful of pixels at 360p.
-    if (REXCVAR_GET(skate3_native_render_scene_handheld_potato) &&
+    // Screen-size-biased clutter LOD (Clutter Detail off). Preserve large
+    // surfaces and nearby skate geometry; progressively discard tiny static
+    // props whose complete draw/material setup resolves to a few pixels.
+    if (!REXCVAR_GET(skate3_native_render_scene_clutter_detail) &&
         !item.dyn_entity && !item.skinned && !item.ropa &&
         !item.cloth_quads && item.bones.empty()) {
       const float sx = item.bbox_max[0] - item.bbox_min[0];

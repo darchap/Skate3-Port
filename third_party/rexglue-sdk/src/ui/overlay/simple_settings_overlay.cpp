@@ -72,8 +72,15 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 31> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 38> kOptionalSimpleSettingsCvars = {
     "skate3_native_render_scene_handheld_potato",
+    "skate3_native_render_scene_vegetation",
+    "skate3_native_render_scene_ambient_npcs",
+    "skate3_native_render_scene_movable_props",
+    "skate3_native_render_scene_clutter_detail",
+    "skate3_native_render_scene_lightmaps",
+    "skate3_native_render_scene_macro",
+    "skate3_native_render_scene_decals",
     "skate3_android_scene_width_cap",
     "skate3_android_scene_height_cap",
     "skate3_native_render_scene",
@@ -1098,6 +1105,21 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
   world_detail_full_ =
       HasCvar("skate3_native_render_scene_handheld_potato") &&
       !rex::cvar::Query<bool>("skate3_native_render_scene_handheld_potato");
+  vegetation_ = !HasCvar("skate3_native_render_scene_vegetation") ||
+                rex::cvar::Query<bool>("skate3_native_render_scene_vegetation");
+  ambient_npcs_ = !HasCvar("skate3_native_render_scene_ambient_npcs") ||
+                  rex::cvar::Query<bool>("skate3_native_render_scene_ambient_npcs");
+  movable_props_ = !HasCvar("skate3_native_render_scene_movable_props") ||
+                   rex::cvar::Query<bool>("skate3_native_render_scene_movable_props");
+  clutter_detail_ = !HasCvar("skate3_native_render_scene_clutter_detail") ||
+                    rex::cvar::Query<bool>("skate3_native_render_scene_clutter_detail");
+  world_texture_layers_ =
+      (HasCvar("skate3_native_render_scene_lightmaps") &&
+       rex::cvar::Query<bool>("skate3_native_render_scene_lightmaps")) ||
+      (HasCvar("skate3_native_render_scene_macro") &&
+       rex::cvar::Query<bool>("skate3_native_render_scene_macro")) ||
+      (HasCvar("skate3_native_render_scene_decals") &&
+       rex::cvar::Query<bool>("skate3_native_render_scene_decals"));
 #endif
   frame_cap_index_ = FrameCapIndexFromCvar();
   if (HasCvar("skate3_display_aspect_mode")) {
@@ -1840,22 +1862,19 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         rows.push_back(std::move(row));
       }
 #if REX_PLATFORM_ANDROID
-      // The master lean switch. While Simplified is on the renderer drops
-      // content and skips the shadow pipelines, so the rows above only take
-      // effect on Full.
+      header("Low-End Devices");
+      // Remaining lean shortcuts with no row of their own yet: coalesced
+      // draw islands, single-pass hair, skipped shadow/outline/spline
+      // pipelines and cheaper water probes.
       if (HasCvar("skate3_native_render_scene_handheld_potato")) {
         RowSpec row;
         row.kind = RowSpec::kEnum;
         row.label = "World Detail";
         row.desc =
-            "Simplified removes vegetation, world clutter, ambient "
-            "pedestrians/traffic and small props, flattens secondary world "
-            "textures and skips building the shadow render pipelines "
-            "entirely, so shadow settings only take effect on Full (the "
-            "handheld profile look). Full restores that content at a real "
-            "GPU/CPU cost; restored grass/foliage can shimmer at low scene "
-            "resolutions. Content already removed comes back as areas "
-            "re-stream while you skate; restart for a clean apply.";
+            "Simplified enables the remaining handheld shortcuts: merged draw "
+            "batches, single-pass hair, cheaper water probes, and no shadow, "
+            "outline or spline pipelines, so shadow settings only take effect "
+            "on Full. The content rows below are independent of this switch.";
         row.options = {"Simplified (fast)", "Full"};
         row.flag = &world_detail_full_;
         row.on_enum_change = [this](int value) {
@@ -1867,6 +1886,125 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         row.reset = [this] {
           world_detail_full_ = true;
           SetBoolCvar("skate3_native_render_scene_handheld_potato", false);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_vegetation")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Vegetation & Foliage";
+        row.desc =
+            "Trees, grass, shrubs and other alpha-tested cards. Off removes "
+            "them at scene capture: far fewer draw calls and no card shimmer "
+            "at low scene resolutions. Content already removed comes back as "
+            "areas re-stream while you skate. Applies immediately.";
+        row.options = {"Off", "On"};
+        row.flag = &vegetation_;
+        row.on_enum_change = [this](int value) {
+          vegetation_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_vegetation", vegetation_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          vegetation_ = true;
+          SetBoolCvar("skate3_native_render_scene_vegetation", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_ambient_npcs")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Pedestrians & Traffic";
+        row.desc =
+            "Ambient pedestrians, traffic, their hair and what they carry. Off "
+            "removes them from the picture and skips their per-frame capture "
+            "cost; it also removes movable street props (same object family), "
+            "so the Movable Props row has no effect while this is Off. The "
+            "player and other skaters are never affected; the simulation and "
+            "its sounds keep running. Applies immediately.";
+        row.options = {"Off", "On"};
+        row.flag = &ambient_npcs_;
+        row.on_enum_change = [this](int value) {
+          ambient_npcs_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_ambient_npcs", ambient_npcs_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          ambient_npcs_ = true;
+          SetBoolCvar("skate3_native_render_scene_ambient_npcs", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_movable_props")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Movable Props";
+        row.desc =
+            "Benches, cones, bins and other pushable street clutter. Off "
+            "removes them at scene capture; gameplay objects stay. Applies "
+            "immediately.";
+        row.options = {"Off", "On"};
+        row.flag = &movable_props_;
+        row.on_enum_change = [this](int value) {
+          movable_props_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_movable_props", movable_props_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          movable_props_ = true;
+          SetBoolCvar("skate3_native_render_scene_movable_props", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_clutter_detail")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Clutter Detail";
+        row.desc =
+            "Tiny static trim and clutter. Reduced drops small props whose "
+            "whole footprint is a few pixels, and more of them with distance. "
+            "Rails, ledges and large surfaces are always kept. Applies "
+            "immediately.";
+        row.options = {"Reduced", "Full"};
+        row.flag = &clutter_detail_;
+        row.on_enum_change = [this](int value) {
+          clutter_detail_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_clutter_detail", clutter_detail_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          clutter_detail_ = true;
+          SetBoolCvar("skate3_native_render_scene_clutter_detail", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_lightmaps")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "World Texture Layers";
+        row.desc =
+            "Secondary world material layers: baked lighting and shadows, "
+            "large-scale grime and weathering, graffiti and decal art. Base "
+            "Color Only keeps just the base textures. Applies immediately.";
+        row.options = {"Base Color Only", "Full"};
+        row.flag = &world_texture_layers_;
+        row.on_enum_change = [this](int value) {
+          world_texture_layers_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_lightmaps", world_texture_layers_);
+          SetBoolCvar("skate3_native_render_scene_macro", world_texture_layers_);
+          SetBoolCvar("skate3_native_render_scene_decals", world_texture_layers_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          world_texture_layers_ = true;
+          SetBoolCvar("skate3_native_render_scene_lightmaps", true);
+          SetBoolCvar("skate3_native_render_scene_macro", true);
+          SetBoolCvar("skate3_native_render_scene_decals", true);
           SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));

@@ -1232,6 +1232,36 @@ REXCVAR_DEFINE_BOOL(skate3_native_render_scene_perf_log, false, "Skate 3",
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_vegetation, true, "Skate 3",
+    "Draw vegetation and alpha-tested world cards: tree cards, grass, shrubs, "
+    "leaf and fence cards. Off drops them at scene capture, which removes a "
+    "large share of draw calls and the shimmer they cause at low scene "
+    "resolutions.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_ambient_npcs, true, "Skate 3",
+    "Draw ambient pedestrians and traffic. Off removes them, their hair and "
+    "every dynamic-object prop (carried items, benches, dumpsters, cones) at "
+    "scene capture; the player and other skaters are unaffected and the "
+    "simulation keeps running.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_movable_props, true, "Skate 3",
+    "Draw movable street props (benches, cones, bins and other pushable "
+    "clutter). Off removes them at scene capture; gameplay geometry is "
+    "unaffected.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_clutter_detail, true, "Skate 3",
+    "Keep tiny static trim and clutter. Off discards small static props "
+    "whose whole footprint is a few pixels, at capture and again by screen "
+    "size at draw time. Rails, ledges and large surfaces are always kept.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(
     skate3_native_render_scene_handheld_potato, false, "Skate 3",
     "Aggressive handheld CPU profile: removes vegetation, alpha-tested "
     "world clutter, ambient pedestrians/traffic and movable props; strips "
@@ -2745,21 +2775,37 @@ bool HandheldPotatoEnabled() {
 // This gate runs before palette capture for dynamic submissions and before
 // publication for statics, so dropped content avoids the expensive scene
 // post-processing and render-side texture/draw work as well.
+// Tree cards and environmentsimple.alphatest (grass, shrubs, leaf/fence
+// cards): extremely draw-heavy and shimmer badly at low scene resolutions.
+bool IsVegetationCard(const DrawItem& item) {
+  return item.env_family == 7 || item.env_family == 9 ||
+         item.env_family == 10 || item.transparent || item.env_family == 13;
+}
+
+// LivingWorld pedestrians/traffic and their hair (family 5 = NPC default_hair;
+// the player's hair is family 4). The player families (1/2), skateboard and
+// gameplay geometry are never here.
+bool IsAmbientNpc(const DrawItem& item) {
+  return item.char_family == 3 || item.char_family == 5 ||
+         item.char_family == 6 || item.char_family == 7;
+}
+
+// Content cuts, each governed by its own user setting. Runs before palette
+// capture for dynamic submissions and before publication for statics, so
+// dropped content also skips scene post-processing and render-side work.
 bool HandheldPotatoDrops(const DrawItem& item) {
-  if (!HandheldPotatoEnabled()) {
-    return false;
-  }
-  // Tree cards and environmentsimple.alphatest (grass, shrubs, leaf/fence
-  // cards) are extremely draw-heavy and shimmer badly at handheld scale.
-  if (item.env_family == 7 || item.env_family == 9 ||
-      item.env_family == 10 || item.transparent || item.env_family == 13) {
+  if (IsVegetationCard(item) &&
+      !REXCVAR_GET(skate3_native_render_scene_vegetation)) {
     return true;
   }
-  // LivingWorld pedestrians/traffic and movable street clutter require
-  // per-frame palette/world capture. Preserve the player families (1/2),
-  // skateboard and gameplay geometry; remove ambient simulation visuals.
-  if (item.char_family == 3 || item.char_family == 6 ||
-      item.char_family == 7 || item.dynobj != 0) {
+  // Pedestrians off also drops dynobj items: the caps, bottles and other
+  // objects they carry are dynobj and would float in place otherwise.
+  if ((IsAmbientNpc(item) || item.dynobj != 0) &&
+      !REXCVAR_GET(skate3_native_render_scene_ambient_npcs)) {
+    return true;
+  }
+  if (item.dynobj != 0 &&
+      !REXCVAR_GET(skate3_native_render_scene_movable_props)) {
     return true;
   }
   return false;
@@ -2771,7 +2817,8 @@ bool HandheldPotatoDrops(const DrawItem& item) {
 // deliberately not used by the dynamic capture path, so the skateboard and
 // player pieces can never be classified as disposable by their bounds.
 bool HandheldPotatoDropsStaticGeometry(const DrawItem& item) {
-  if (!HandheldPotatoEnabled() || item.char_family != 0 || item.water) {
+  if (REXCVAR_GET(skate3_native_render_scene_clutter_detail) ||
+      item.char_family != 0 || item.water) {
     return false;
   }
   const float sx = std::fabs(item.bbox_max[0] - item.bbox_min[0]);
@@ -2783,26 +2830,6 @@ bool HandheldPotatoDropsStaticGeometry(const DrawItem& item) {
     indices += draw.index_count;
   }
   return longest < 1.25f || (longest < 2.0f && indices < 60);
-}
-
-void ApplyHandheldPotatoMaterial(DrawItem& item) {
-  if (!HandheldPotatoEnabled() || item.char_family != 0 || item.water) {
-    return;
-  }
-  // Retain the authored base color but replace every secondary material
-  // input with the renderer's shared neutral textures. This eliminates the
-  // guest route checks, decode/store traffic and streaming heals for maps
-  // that are barely visible at 360p: baked light, macro grime, detail/
-  // normal, spec/reflection masks and decal artwork.
-  item.lightmap_tex = 0;
-  item.macro_tex = 0;
-  item.detail_tex = 0;
-  item.spec_tex = 0;
-  item.decal_art = 0;
-  item.decal = false;
-  item.decal_tileable = false;
-  std::memset(item.diffuse_fetch, 0, sizeof(item.diffuse_fetch));
-  std::memset(item.decal_fetch, 0, sizeof(item.decal_fetch));
 }
 
 bool BuildItemGeometry(uint8_t* base, uint32_t ctx, DrawItem& item) {
@@ -2832,7 +2859,6 @@ bool BuildItemGeometry(uint8_t* base, uint32_t ctx, DrawItem& item) {
   if (prof) {
     g_pw_bi_fetch.Add(PerfNsSince(fetch_t0));
   }
-  ApplyHandheldPotatoMaterial(item);
   // Identity for per-instance consumers (the occlusion cull's guest-side
   // dispatch filter keys on it; the dynamic capture path overwrites it with
   // its own value).
@@ -10522,9 +10548,10 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
   // probes made every guest draw re-read and strstr shader debug paths when a
   // family wasn't present in the current view (especially ocean/water).
   const bool potato_capture_skip = HandheldPotatoEnabled();
-  g_tree_frame_done = potato_capture_skip;
+  g_tree_frame_done = !REXCVAR_GET(skate3_native_render_scene_vegetation);
   g_proxy_frame_done = false;
-  g_dynobj_frame_done = potato_capture_skip;
+  g_dynobj_frame_done = !REXCVAR_GET(skate3_native_render_scene_movable_props) ||
+                        !REXCVAR_GET(skate3_native_render_scene_ambient_npcs);
   g_water_frame_done = potato_capture_skip;
   g_ocean_frame_done = potato_capture_skip;
   g_oceanrefl_frame_done = potato_capture_skip;
