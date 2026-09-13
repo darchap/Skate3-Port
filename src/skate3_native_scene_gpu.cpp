@@ -8395,8 +8395,19 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
   const bool handheld_on = !hdr_on && !msaa_on && g_r.handheld_color != nullptr &&
                            g_r.handheld_srv != nullptr &&
                            g_r.pso_blur_blit != nullptr;
+  // MSAA with a capped scene target: the resolve pass runs 1:1 at the scene
+  // size, so it must land in the scene-sized intermediate and take the same
+  // upscale blit as the non-MSAA handheld path. Resolving straight into the
+  // guest output painted the scene into its top-left corner (black right/
+  // bottom bars) because the scene-sized viewport was still active.
+  const bool msaa_upscale =
+      msaa_on && !hdr_on && g_r.handheld_color != nullptr &&
+      g_r.handheld_srv != nullptr && g_r.pso_blur_blit != nullptr &&
+      (g_r.handheld_width < context.guest_output_width ||
+       g_r.handheld_height < context.guest_output_height);
 #else
   constexpr bool handheld_on = false;
+  constexpr bool msaa_upscale = false;
 #endif
   if (!g_r.announced) {
     g_r.announced = true;
@@ -8449,17 +8460,22 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     cmd->SetRenderTargets(scene_color, nullptr);
   }
 
+  // The viewport must match the SCENE target's size: with MSAA on and a
+  // capped Android scene target, scene_color is the scene-sized MSAA plane
+  // (msaa_upscale), and rendering it with the guest-output viewport cropped
+  // the frame to the buffer's top-left corner.
+  const bool scene_sized = handheld_on || msaa_upscale;
   nrhi::Viewport viewport{0.0f, 0.0f,
-                          float(handheld_on ? g_r.handheld_width
+                          float(scene_sized ? g_r.handheld_width
                                             : context.guest_output_width),
-                          float(handheld_on ? g_r.handheld_height
+                          float(scene_sized ? g_r.handheld_height
                                             : context.guest_output_height),
                           0.0f, 1.0f};
   cmd->SetViewport(viewport);
   nrhi::Rect scissor{0, 0,
-                     int32_t(handheld_on ? g_r.handheld_width
+                     int32_t(scene_sized ? g_r.handheld_width
                                          : context.guest_output_width),
-                     int32_t(handheld_on ? g_r.handheld_height
+                     int32_t(scene_sized ? g_r.handheld_height
                                          : context.guest_output_height)};
   cmd->SetScissor(scissor);
   cmd->SetBindingLayout(g_r.layout);
@@ -11045,12 +11061,14 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
     // pass, then restore steady-state resource states.
     cmd->Barrier(g_r.msaa_color, nrhi::ResourceState::kRenderTarget,
                  nrhi::ResourceState::kPixelShaderResource);
-    if (!hdr_on) {
+    if (!hdr_on && !msaa_upscale) {
       cmd->Barrier(context.guest_output, nrhi::ResourceState::kGuestOutput,
                    nrhi::ResourceState::kRenderTarget);
     }
     cmd->FlushBarriers();
-    cmd->SetRenderTargets(hdr_on ? g_r.hdr_resolved : context.guest_output,
+    cmd->SetRenderTargets(hdr_on          ? g_r.hdr_resolved
+                          : msaa_upscale ? g_r.handheld_color
+                                         : context.guest_output,
                           nullptr);
     cmd->SetPipeline(g_r.resolve_pso);
     cmd->SetTexture(1, g_r.msaa_srv_slot);
@@ -11060,11 +11078,12 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
                  nrhi::ResourceState::kRenderTarget);
   }
 
-  if (handheld_on) {
-    // One bilinear upscale of the finished 3D scene. Everything after this
-    // point (outline/post, popup blur, HUD/APT and the recomp settings UI)
-    // uses the full 1280x720 guest output, so lowering 3D cost cannot blur
-    // text or disturb menu coordinates.
+  if (handheld_on || msaa_upscale) {
+    // One bilinear upscale of the finished 3D scene (straight from the
+    // scene plane, or from the MSAA resolve that just landed there).
+    // Everything after this point (outline/post, popup blur, HUD/APT and
+    // the recomp settings UI) uses the full 1280x720 guest output, so
+    // lowering 3D cost cannot blur text or disturb menu coordinates.
     cmd->Barrier(g_r.handheld_color, nrhi::ResourceState::kRenderTarget,
                  nrhi::ResourceState::kPixelShaderResource);
     cmd->Barrier(context.guest_output, nrhi::ResourceState::kGuestOutput,
