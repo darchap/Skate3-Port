@@ -685,6 +685,9 @@ struct RendererState {
   // let the lazily-built tonemap/SSR pipelines follow the swap.
   bool showcase_shaders_want = false;
   bool showcase_shaders = false;
+  // Lean (handheld_potato) pipeline family currently built; a live flip to
+  // Full re-enters the rebuild so the shadow/outline/spline PSOs get compiled.
+  bool lean_pipelines = true;
   bool hdr_showcase = false;
   bool ssr_showcase = false;
   // 1x float scene plane: the MSAA resolve destination (or the scene target

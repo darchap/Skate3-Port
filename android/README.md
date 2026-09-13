@@ -51,6 +51,7 @@ built with `gradlew.bat assembleDebug`.
 
 ## In-game overlay
 
-Press **RB + Start** to open the runtime settings overlay. **Video > Android Device
-Profile** switches between Performance (512x288) and High-End (1280x720); apply and
-restart. Both profiles keep the 60 FPS guest cap.
+Press **RB + Start** to open the runtime settings overlay. Every graphics option under
+**Video** is yours and survives restarts: **3D Scene Resolution** (512x288 to 1280x720,
+applies live), **World Detail** (Full or Simplified), MSAA, shadows, SSAO, bloom and
+the rest. **Android Device Profile** currently has one entry, Custom.

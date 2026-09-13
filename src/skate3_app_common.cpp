@@ -119,11 +119,23 @@ REXCVAR_DEFINE_DOUBLE(skate3_ultrawide_target_aspect, 0.0, "Skate 3",
 #if defined(__ANDROID__)
 REXCVAR_DEFINE_INT32(
     skate3_android_quality_profile, 0, "Skate 3",
-    "Android device profile: 0 = RG406V / Performance (288p and aggressive "
-    "scene cuts), 1 = High-End / Quality (720p and the full native material "
-    "pipeline). Applied after restart.")
-    .range(0, 1)
+    "Android device profile: 0 = Custom (the settings file owns every graphics "
+    "option). Applied after restart.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+// Scene target caps, consumed by EnsureOutputSizedTargets in
+// skate3_native_scene_gpu.cpp. 0 = the 1280x720 box.
+REXCVAR_DEFINE_INT32(skate3_android_scene_width_cap, 0, "Skate 3",
+                     "3D scene target width cap in pixels (0 = 1280). "
+                     "Applies live; the scene target is rebuilt on the next "
+                     "frame.")
+    .range(0, 2560)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_INT32(skate3_android_scene_height_cap, 540, "Skate 3",
+                     "3D scene target height cap in pixels (0 = 720). "
+                     "Applies live; the scene target is rebuilt on the next "
+                     "frame.")
+    .range(0, 1440)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 #endif
 
 namespace {
@@ -453,6 +465,28 @@ void ApplyFirstRunVideoDefaults(const std::filesystem::path& settings_path,
   rex::cvar::SetFlagByName("resolution_scale", scale);
   rex::cvar::SetFlagByName("draw_resolution_scale_x", scale);
   rex::cvar::SetFlagByName("draw_resolution_scale_y", scale);
+#if defined(__ANDROID__)
+  // First launch only: start from the lean, verified handheld look. These are
+  // all user-facing rows; the settings file owns them from here on.
+  constexpr std::pair<std::string_view, std::string_view> kFirstRunAndroid[] = {
+      {"skate3_android_scene_width_cap", "960"},
+      {"skate3_android_scene_height_cap", "540"},
+      {"skate3_draw_distance_scale", "0.5"},
+      {"skate3_lod_distance_scale", "0.5"},
+      {"skate3_draw_distance_stream_probe", "0"},
+      {"skate3_native_render_scene_msaa", "1"},
+      {"skate3_native_render_scene_shadows", "false"},
+      {"skate3_native_render_scene_shadow_static_casters", "false"},
+      {"skate3_native_render_scene_shadow_pcss", "false"},
+      {"skate3_native_render_scene_ssao", "false"},
+      {"skate3_native_render_scene_bloom", "false"},
+      {"skate3_native_render_scene_shafts", "false"},
+      {"skate3_native_render_scene_haze", "false"},
+  };
+  for (const auto& [name, value] : kFirstRunAndroid) {
+    rex::cvar::SetFlagByName(std::string(name), std::string(value));
+  }
+#endif
 }
 
 void LoadAndNormalizeSimpleSettings(const std::filesystem::path& settings_path,
@@ -596,78 +630,16 @@ void Skate3BaseApp::OnConfigurePaths(rex::PathConfig& paths) {
   rex::cvar::SetFlagByName("draw_resolution_scale_x", "1");
   rex::cvar::SetFlagByName("draw_resolution_scale_y", "1");
 
-  // Apply a coherent profile after loading settings. The performance profile
-  // keeps the known-good RG406V budget. During the QA 4 isolation test, the
-  // quality profile uses the same lean scene configuration while selecting
-  // its separate 720p scene target inside the renderer.
-  constexpr std::pair<std::string_view, std::string_view> kPerformancePreset[] = {
-      {"skate3_native_render_scene_handheld_potato", "true"},
+  // Internal pacing/stability cvars with no menu row. Pinned every boot; every
+  // user-facing setting is deliberately absent so the saved settings file wins.
+  constexpr std::pair<std::string_view, std::string_view> kAndroidBaseline[] = {
       {"native_render_suppress_mode", "1"},
       {"skate3_native_render_guest_static_refresh", "8"},
       {"skate3_native_render_lw_update_refresh", "1"},
-      {"skate3_draw_distance_scale", "0.5"},
-      {"skate3_lod_distance_scale", "0.5"},
-      {"skate3_draw_distance_stream_probe", "0"},
-      {"skate3_native_render_scene_msaa", "1"},
-      {"skate3_native_render_scene_shadows", "false"},
-      {"skate3_native_render_scene_shadow_static_casters", "false"},
-      {"skate3_native_render_scene_shadow_pcss", "false"},
-      {"skate3_native_render_scene_ssao", "false"},
-      {"skate3_native_render_scene_hdr", "false"},
-      {"skate3_native_render_scene_bloom", "false"},
-      {"skate3_native_render_scene_shafts", "false"},
-      {"skate3_native_render_scene_haze", "false"},
-      {"skate3_native_render_scene_smooth_camera", "false"},
-      {"skate3_native_render_scene_selection_outline", "false"},
-      {"skate3_native_render_scene_lightmaps", "false"},
-      {"skate3_native_render_scene_macro", "false"},
-      {"skate3_native_render_scene_decals", "false"},
-      {"skate3_native_render_scene_sort_opaque", "false"},
-      {"skate3_native_render_scene_splines", "false"},
-      {"skate3_native_render_scene_ropa_blend", "false"},
-      {"skate3_native_render_scene_entity_fade", "false"},
-      {"skate3_native_render_scene_lw_fade", "false"},
-      {"skate3_native_render_scene_lw_gap_fill", "false"},
-      {"skate3_native_render_scene_lw_identity", "false"},
-      {"skate3_native_render_scene_lw_palette", "false"},
-      {"skate3_native_render_scene_prewarm_budget_ms", "8"},
-      {"skate3_native_render_scene_occlusion_cull", "true"},
-      {"skate3_native_render_scene_occlusion_cull_build", "true"},
-      {"skate3_native_render_scene_occlusion_cull_guest", "true"},
-      {"skate3_native_render_scene_perf_log", "false"},
-      {"skate3_native_render_scene_perf_interval", "300"},
-      {"show_fps_counter", "true"},
-  };
-  constexpr std::pair<std::string_view, std::string_view> kHighEndPreset[] = {
-      // QA compatibility baseline: use the exact scene feature set already
-      // proven on the RP5 Performance profile while the renderer selects the
-      // Quality profile's 720-line target. QA 3 removed the unsafe world
-      // stream probe but the RP5 still produced audio behind a black native
-      // frame before any gameplay/pipeline-success line. Isolating resolution
-      // from content/pipeline expansion lets device testing identify whether
-      // the 720p target itself is safe before features return in small groups.
-      {"skate3_native_render_scene_handheld_potato", "true"},
-      {"native_render_suppress_mode", "1"},
-      {"skate3_native_render_guest_static_refresh", "8"},
-      {"skate3_native_render_lw_update_refresh", "1"},
-      {"skate3_draw_distance_scale", "0.5"},
-      {"skate3_lod_distance_scale", "0.5"},
-      {"skate3_draw_distance_stream_probe", "0"},
-      {"skate3_native_render_scene_msaa", "1"},
-      {"skate3_native_render_scene_shadows", "false"},
-      {"skate3_native_render_scene_shadow_static_casters", "false"},
-      {"skate3_native_render_scene_shadow_pcss", "false"},
-      {"skate3_native_render_scene_ssao", "false"},
       {"skate3_native_render_scene_ssr", "false"},
       {"skate3_native_render_scene_hdr", "false"},
-      {"skate3_native_render_scene_bloom", "false"},
-      {"skate3_native_render_scene_shafts", "false"},
-      {"skate3_native_render_scene_haze", "false"},
       {"skate3_native_render_scene_smooth_camera", "false"},
       {"skate3_native_render_scene_selection_outline", "false"},
-      {"skate3_native_render_scene_lightmaps", "false"},
-      {"skate3_native_render_scene_macro", "false"},
-      {"skate3_native_render_scene_decals", "false"},
       {"skate3_native_render_scene_sort_opaque", "false"},
       {"skate3_native_render_scene_splines", "false"},
       {"skate3_native_render_scene_ropa_blend", "false"},
@@ -680,28 +652,17 @@ void Skate3BaseApp::OnConfigurePaths(rex::PathConfig& paths) {
       {"skate3_native_render_scene_occlusion_cull", "true"},
       {"skate3_native_render_scene_occlusion_cull_build", "true"},
       {"skate3_native_render_scene_occlusion_cull_guest", "true"},
-      {"skate3_native_render_scene_perf_log", "false"},
-      {"skate3_native_render_scene_perf_interval", "300"},
-      {"show_fps_counter", "false"},
   };
-  const int32_t android_profile =
-      std::clamp(rex::cvar::Query<int32_t>("skate3_android_quality_profile"), 0, 1);
-  const auto apply_profile = [](const auto& profile) {
-    for (const auto& [name, value] : profile) {
-      rex::cvar::SetFlagByName(std::string(name), std::string(value));
-    }
-  };
-  if (android_profile == 0) {
-    apply_profile(kPerformancePreset);
-    REXLOG_INFO(
-        "Android device profile: RG406V / Performance (512x288, 0.5x "
-        "world/LOD, simplified materials)");
-  } else {
-    apply_profile(kHighEndPreset);
-    REXLOG_INFO(
-        "Android device profile: High-End / Quality compatibility baseline "
-        "(1280x720 target, verified lean scene feature set)");
+  for (const auto& [name, value] : kAndroidBaseline) {
+    rex::cvar::SetFlagByName(std::string(name), std::string(value));
   }
+  REXLOG_INFO("Android baseline applied; scene cap {}x{}, saved settings preserved",
+              rex::cvar::Query<int32_t>("skate3_android_scene_width_cap") > 0
+                  ? rex::cvar::Query<int32_t>("skate3_android_scene_width_cap")
+                  : 1280,
+              rex::cvar::Query<int32_t>("skate3_android_scene_height_cap") > 0
+                  ? rex::cvar::Query<int32_t>("skate3_android_scene_height_cap")
+                  : 720);
 #endif
   Skate3InitializeFieldOfViewOverride();
   ApplyNativeDisplayAspectDefaults();

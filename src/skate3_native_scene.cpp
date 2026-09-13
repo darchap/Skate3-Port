@@ -1232,13 +1232,7 @@ REXCVAR_DEFINE_BOOL(skate3_native_render_scene_perf_log, false, "Skate 3",
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 REXCVAR_DEFINE_BOOL(
-    skate3_native_render_scene_handheld_potato,
-#if REX_PLATFORM_ANDROID
-    true,
-#else
-    false,
-#endif
-    "Skate 3",
+    skate3_native_render_scene_handheld_potato, false, "Skate 3",
     "Aggressive handheld CPU profile: removes vegetation, alpha-tested "
     "world clutter, ambient pedestrians/traffic and movable props; strips "
     "secondary world textures; and coalesces nearby draw islands. Intended "

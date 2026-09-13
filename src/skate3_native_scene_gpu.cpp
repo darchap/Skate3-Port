@@ -131,7 +131,8 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_ssao_debug);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_ssao_full_res);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_ssr);
 #if REX_PLATFORM_ANDROID
-REXCVAR_DECLARE(int32_t, skate3_android_quality_profile);
+REXCVAR_DECLARE(int32_t, skate3_android_scene_width_cap);
+REXCVAR_DECLARE(int32_t, skate3_android_scene_height_cap);
 #endif
 REXCVAR_DECLARE(bool, skate3_native_render_scene_tex_mips);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_tex_revalidate);
@@ -4317,10 +4318,22 @@ bool EnsureOutputSizedTargets(const NativeGuestOutputRenderContext& context) {
   // The RG406V profile retains its 288-line low-power budget (384x288 at
   // 4:3); the high-end profile renders at the full 720-line output
   // (960x720 at 4:3).
-  const bool high_end_profile =
-      std::clamp(REXCVAR_GET(skate3_android_quality_profile), 0, 1) == 1;
-  const uint32_t width_cap = high_end_profile ? 1280u : 512u;
-  const uint32_t height_cap = high_end_profile ? 720u : 288u;
+  // Caps come from the hot-reload scene-cap cvars (0 = the 1280x720 box);
+  // the dimension comparison below rebuilds the targets on the next frame
+  // after a change.
+  uint32_t width_cap = 1280u;
+  uint32_t height_cap = 720u;
+  {
+    const int32_t custom_width_cap = REXCVAR_GET(skate3_android_scene_width_cap);
+    const int32_t custom_height_cap =
+        REXCVAR_GET(skate3_android_scene_height_cap);
+    if (custom_width_cap > 0) {
+      width_cap = uint32_t(std::clamp(custom_width_cap, 2, 2560));
+    }
+    if (custom_height_cap > 0) {
+      height_cap = uint32_t(std::clamp(custom_height_cap, 2, 1440));
+    }
+  }
   uint32_t height = std::min(context.guest_output_height, height_cap);
   uint32_t width = uint32_t((uint64_t(height) * context.guest_output_width +
                              context.guest_output_height / 2) /
@@ -4553,11 +4566,20 @@ bool EnsurePipeline(const NativeGuestOutputRenderContext& context) {
   uint32_t msaa_want =
       msaa_req >= 8 ? 8u : msaa_req >= 4 ? 4u : msaa_req >= 2 ? 2u : 1u;
   msaa_want = device->GetSupportedSampleCount(scene_fmt_want, msaa_want);
+  // A lean Android scene never executes the optional passes; follow the scene
+  // feature flag so a live World Detail change rebuilds the family.
+#if REX_PLATFORM_ANDROID
+  const bool lean_android_pipelines =
+      REXCVAR_GET(skate3_native_render_scene_handheld_potato);
+#else
+  constexpr bool lean_android_pipelines = false;
+#endif
   if (!g_r.pso || g_r.rtv_format != context.guest_output->format() ||
       g_r.hdr_active != hdr_want ||
       (hdr_want && g_r.hdr_scene_format != hdr_fmt_want) ||
       g_r.msaa != msaa_want ||
-      g_r.showcase_shaders != g_r.showcase_shaders_want) {
+      g_r.showcase_shaders != g_r.showcase_shaders_want ||
+      g_r.lean_pipelines != lean_android_pipelines) {
     if (g_r.msaa != msaa_want && g_r.pfx_ready) {
       // The photo-postfx depth-pack pass is compiled against the depth
       // buffer's sample count (PFX_MSAA variant); retire the chain's PSOs
@@ -4574,17 +4596,7 @@ bool EnsurePipeline(const NativeGuestOutputRenderContext& context) {
     g_r.hdr_scene_format = hdr_fmt_want;
     g_r.msaa = msaa_want;
     g_r.showcase_shaders = g_r.showcase_shaders_want;
-    // A lean Android scene never executes these optional passes. Follow the
-    // scene feature flag instead of the profile number: QA compatibility
-    // builds deliberately pair Quality's 720p target with Performance's lean
-    // feature set. Keying this to profile 0 still compiled the full optional
-    // PSO family on profile 1, making RP5 startup depend on shader-cache timing.
-#if REX_PLATFORM_ANDROID
-    const bool lean_android_pipelines =
-        REXCVAR_GET(skate3_native_render_scene_handheld_potato);
-#else
-    constexpr bool lean_android_pipelines = false;
-#endif
+    g_r.lean_pipelines = lean_android_pipelines;
     if (!EnsureScenePsoFamily(context) || !EnsureResolvePso(context) ||
         !EnsureBlurPsos(context) ||
         (!lean_android_pipelines && !EnsureOutlineEdgePso(context)) ||
@@ -12213,36 +12225,9 @@ void ResetSceneFailure() {
 
 void Install() {
 #if REX_PLATFORM_ANDROID
-  // The app layer applies the selected Android profile after loading saved
-  // settings. Keep the native renderer mandatory on both profiles. Apply the
-  // conservative duplicate guard whenever the active scene preset is lean,
-  // including QA builds that test the Quality resolution with lean features.
+  // Keep the native renderer mandatory on Android. Every scene feature cvar
+  // is a user setting loaded from the settings file; nothing is forced here.
   REXCVAR_SET(skate3_native_render_scene, true);
-  if (REXCVAR_GET(skate3_native_render_scene_handheld_potato)) {
-    REXCVAR_SET(skate3_native_render_scene_handheld_potato, true);
-    REXCVAR_SET(skate3_native_render_scene_msaa, 1);
-    REXCVAR_SET(skate3_native_render_scene_shadows, false);
-    REXCVAR_SET(skate3_native_render_scene_shadow_static_casters, false);
-    REXCVAR_SET(skate3_native_render_scene_shadow_pcss, false);
-    REXCVAR_SET(skate3_native_render_scene_ssao, false);
-    REXCVAR_SET(skate3_native_render_scene_ssr, false);
-    REXCVAR_SET(skate3_native_render_scene_hdr, false);
-    REXCVAR_SET(skate3_native_render_scene_bloom, false);
-    REXCVAR_SET(skate3_native_render_scene_shafts, false);
-    REXCVAR_SET(skate3_native_render_scene_selection_outline, false);
-    REXCVAR_SET(skate3_native_render_scene_lightmaps, false);
-    REXCVAR_SET(skate3_native_render_scene_macro, false);
-    REXCVAR_SET(skate3_native_render_scene_decals, false);
-    REXCVAR_SET(skate3_native_render_scene_sort_opaque, false);
-    REXCVAR_SET(skate3_native_render_scene_splines, false);
-    REXCVAR_SET(skate3_native_render_scene_ropa_blend, false);
-    REXCVAR_SET(skate3_native_render_scene_entity_fade, false);
-    REXCVAR_SET(skate3_native_render_scene_lw_fade, false);
-    REXCVAR_SET(skate3_native_render_scene_lw_gap_fill, false);
-    REXCVAR_SET(skate3_native_render_scene_lw_identity, false);
-    REXCVAR_SET(skate3_native_render_scene_lw_palette, false);
-    REXCVAR_SET(skate3_native_render_scene_prewarm_budget_ms, 8);
-  }
 #endif
   // Registered even when the scene cvar starts off: RenderScene yields to the
   // emulated output while disabled, and the runtime toggle (F5) can flip the

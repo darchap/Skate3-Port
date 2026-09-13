@@ -38,8 +38,18 @@ namespace {
 
 #if REX_PLATFORM_ANDROID
 constexpr std::array<int32_t, 1> kResolutionScales = {1};
-constexpr std::array<const char*, 2> kAndroidQualityProfileLabels = {
-    "RG406V / Performance", "High-End / Quality"};
+constexpr std::array<const char*, 1> kAndroidQualityProfileLabels = {"Custom"};
+// Custom-profile 3D scene target sizes (16:9, even dimensions; the renderer
+// masks with & ~1u). The height is what the scene-cap cvar stores; widths
+// are derived from the 16:9 output shape at render time.
+constexpr std::array<const char*, 8> kAndroidSceneResLabels = {
+    "512 x 288 (Performance)", "640 x 360",  "768 x 432",
+    "854 x 480",               "960 x 540",  "1088 x 612",
+    "1152 x 648",              "1280 x 720 (Quality)"};
+constexpr std::array<int32_t, 8> kAndroidSceneResHeights = {
+    288, 360, 432, 480, 540, 612, 648, 720};
+constexpr std::array<int32_t, 8> kAndroidSceneResWidths = {
+    512, 640, 768, 854, 960, 1088, 1152, 1280};
 #else
 constexpr std::array<int32_t, 3> kResolutionScales = {1, 2, 3};
 constexpr std::array<const char*, 3> kResolutionLabels = {"720p (1x)", "1440p (2x)",
@@ -62,7 +72,10 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 28> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 31> kOptionalSimpleSettingsCvars = {
+    "skate3_native_render_scene_handheld_potato",
+    "skate3_android_scene_width_cap",
+    "skate3_android_scene_height_cap",
     "skate3_native_render_scene",
     "skate3_native_render_scene_msaa",
     "skate3_native_render_scene_shadows",
@@ -341,6 +354,27 @@ int AndroidQualityProfileIndexFromCvar() {
                    rex::cvar::Query<int32_t>("skate3_android_quality_profile"),
                    0, static_cast<int>(kAndroidQualityProfileLabels.size()) - 1)
              : 0;
+}
+
+// Nearest option to the custom-profile height cap (0 = the 720 fallback).
+int AndroidSceneResIndexFromCvar() {
+  if (!HasCvar("skate3_android_scene_height_cap")) {
+    return static_cast<int>(kAndroidSceneResHeights.size()) - 1;
+  }
+  int32_t height = rex::cvar::Query<int32_t>("skate3_android_scene_height_cap");
+  if (height <= 0) {
+    height = 720;
+  }
+  int best = 0;
+  int32_t best_delta = 100000;
+  for (int i = 0; i < static_cast<int>(kAndroidSceneResHeights.size()); ++i) {
+    const int32_t delta = std::abs(kAndroidSceneResHeights[i] - height);
+    if (delta < best_delta) {
+      best = i;
+      best_delta = delta;
+    }
+  }
+  return best;
 }
 #endif
 
@@ -1060,6 +1094,10 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
   resolution_scale_index_ = ResolutionIndexFromCvar();
 #if REX_PLATFORM_ANDROID
   android_quality_profile_index_ = AndroidQualityProfileIndexFromCvar();
+  android_scene_res_index_ = AndroidSceneResIndexFromCvar();
+  world_detail_full_ =
+      HasCvar("skate3_native_render_scene_handheld_potato") &&
+      !rex::cvar::Query<bool>("skate3_native_render_scene_handheld_potato");
 #endif
   frame_cap_index_ = FrameCapIndexFromCvar();
   if (HasCvar("skate3_display_aspect_mode")) {
@@ -1403,11 +1441,8 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         row.kind = RowSpec::kEnum;
         row.label = "Android Device Profile";
         row.desc =
-            "RG406V / Performance keeps the verified 288-line low-power "
-            "renderer. High-End / Quality currently tests the same verified "
-            "scene feature set at a 720-line target so black-screen reports can "
-            "be isolated from optional scene features. Requires Apply "
-            "& Restart.";
+            "Custom: every graphics option below is yours and is kept across "
+            "restarts. Requires Apply & Restart.";
         for (const char* label : kAndroidQualityProfileLabels) {
           row.options.push_back(label);
         }
@@ -1421,31 +1456,33 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         row.kind = RowSpec::kEnum;
 #if REX_PLATFORM_ANDROID
         row.label = "3D Scene Resolution";
+        // A real selector driving the hot-reload scene-cap cvars; the
+        // renderer rebuilds its targets on the next frame.
         row.desc =
-            "The internal 3D resolution selected by the staged Android device "
-            "profile. Menus and the HUD remain at the full output resolution.";
-        const bool high_end = std::clamp(android_quality_profile_index_, 0, 1) == 1;
-        const uint32_t width_cap = high_end ? 1280u : 512u;
-        const uint32_t height_cap = high_end ? 720u : 288u;
-        double aspect = 16.0 / 9.0;
-        if (aspect_ratio_index_ == 1) {
-          aspect = 4.0 / 3.0;
-        } else if (aspect_ratio_index_ == 2) {
-          const ImVec2 display = ImGui::GetIO().DisplaySize;
-          const double host_aspect =
-              display.y > 0.0f ? double(display.x) / double(display.y) : 0.0;
-          aspect = host_aspect > (16.0 / 9.0) ? host_aspect : (21.0 / 9.0);
+            "Internal 3D resolution. Menus and the HUD remain at the full "
+            "output resolution. Applies immediately; lower is faster. "
+            "960 x 540 is a good middle ground.";
+        for (const char* label : kAndroidSceneResLabels) {
+          row.options.push_back(label);
         }
-        uint32_t scene_height = height_cap;
-        uint32_t scene_width = uint32_t(double(scene_height) * aspect + 0.5);
-        if (scene_width > width_cap) {
-          scene_width = width_cap;
-          scene_height = uint32_t(double(scene_width) / aspect + 0.5);
-        }
-        scene_width = std::max(scene_width & ~1u, 2u);
-        scene_height = std::max(scene_height & ~1u, 2u);
-        row.options.push_back(std::to_string(scene_width) + " x " +
-                              std::to_string(scene_height));
+        row.index = &android_scene_res_index_;
+        row.on_enum_change = [this](int value) {
+          android_scene_res_index_ = std::clamp(
+              value, 0, static_cast<int>(kAndroidSceneResHeights.size()) - 1);
+          rex::cvar::SetFlagByName(
+              "skate3_android_scene_height_cap",
+              std::to_string(kAndroidSceneResHeights[android_scene_res_index_]));
+          rex::cvar::SetFlagByName(
+              "skate3_android_scene_width_cap",
+              std::to_string(kAndroidSceneResWidths[android_scene_res_index_]));
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          android_scene_res_index_ = 4;  // 960 x 540
+          rex::cvar::SetFlagByName("skate3_android_scene_height_cap", "540");
+          rex::cvar::SetFlagByName("skate3_android_scene_width_cap", "960");
+          SaveSimpleSettingsConfig(config_path_);
+        };
 #else
         row.label = "Render Scale";
         row.desc =
@@ -1802,6 +1839,39 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         };
         rows.push_back(std::move(row));
       }
+#if REX_PLATFORM_ANDROID
+      // The master lean switch. While Simplified is on the renderer drops
+      // content and skips the shadow pipelines, so the rows above only take
+      // effect on Full.
+      if (HasCvar("skate3_native_render_scene_handheld_potato")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "World Detail";
+        row.desc =
+            "Simplified removes vegetation, world clutter, ambient "
+            "pedestrians/traffic and small props, flattens secondary world "
+            "textures and skips building the shadow render pipelines "
+            "entirely, so shadow settings only take effect on Full (the "
+            "handheld profile look). Full restores that content at a real "
+            "GPU/CPU cost; restored grass/foliage can shimmer at low scene "
+            "resolutions. Content already removed comes back as areas "
+            "re-stream while you skate; restart for a clean apply.";
+        row.options = {"Simplified (fast)", "Full"};
+        row.flag = &world_detail_full_;
+        row.on_enum_change = [this](int value) {
+          world_detail_full_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_handheld_potato",
+                      !world_detail_full_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          world_detail_full_ = true;
+          SetBoolCvar("skate3_native_render_scene_handheld_potato", false);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+#endif
       if (HasDrawDistanceCvars()) {
         RowSpec row;
         row.kind = RowSpec::kEnum;

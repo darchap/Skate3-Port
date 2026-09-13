@@ -117,6 +117,8 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   bool profile_signed_in_ = true;
   char gamertag_buf_[32] = {};
   // Live setting values (hot cvars, applied and saved on change).
+  int android_scene_res_index_ = 4;  // 960 x 540
+  bool world_detail_full_ = true;
   bool renderer_native_ = true;
   bool ssao_ = true;
   bool static_shadows_ = true;
