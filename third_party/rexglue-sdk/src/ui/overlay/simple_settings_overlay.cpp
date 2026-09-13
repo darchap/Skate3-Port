@@ -57,10 +57,14 @@ constexpr std::array<const char*, 3> kResolutionLabels = {"720p (1x)", "1440p (2
 #endif
 constexpr std::array<const char*, 3> kAspectRatioLabels = {
     "16:9 (Safe)", "4:3 Native", "Ultrawide (Experimental)"};
-constexpr std::array<double, 6> kFrameCapRates = {60.0, 90.0, 120.0, 144.0, 165.0, 240.0};
-constexpr std::array<const char*, 7> kFrameCapLabels = {"Unlimited", "60 FPS",  "90 FPS",
-                                                        "120 FPS",   "144 FPS", "165 FPS",
-                                                        "240 FPS"};
+// Sub-60 caps for phones that pace better below their refresh: 40 divides
+// 120 Hz evenly, 45 divides 90 Hz.
+constexpr std::array<double, 10> kFrameCapRates = {30.0,  40.0,  45.0,  50.0,  60.0,
+                                                   90.0,  120.0, 144.0, 165.0, 240.0};
+constexpr std::array<const char*, 11> kFrameCapLabels = {"Unlimited", "30 FPS",  "40 FPS",
+                                                         "45 FPS",    "50 FPS",  "60 FPS",
+                                                         "90 FPS",    "120 FPS", "144 FPS",
+                                                         "165 FPS",   "240 FPS"};
 constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
     "resolution_scale",
     "draw_resolution_scale_x",
@@ -1163,7 +1167,6 @@ bool SimpleSettingsDialog::HasSettingsChanges() const {
          (HasGraphicsApiChoice() && graphics_api_index_ != GraphicsApiIndexFromCvar()) ||
          device_index_ != DeviceIndexFromCvar(device_list_) ||
          resolution_scale_index_ != ResolutionIndexFromCvar() ||
-         frame_cap_index_ != FrameCapIndexFromCvar() ||
          (HasMsaaCvar() && msaa_index_ != MsaaIndexFromCvar()) ||
          (HasShadowQualityCvars() && shadow_quality_index_ != ShadowQualityIndexFromCvar()) ||
          (HasStaticShadowCvars() &&
@@ -1227,6 +1230,36 @@ void SimpleSettingsDialog::ReloadProfiles() {
   profile_signed_in_ = profiles_.profiles[profiles_.selected_index].signed_in;
 }
 
+void SimpleSettingsDialog::ApplyFrameCap() {
+  if (UseGuestFrameCap()) {
+    const int rate_base = FrameCapRateBaseIndex();
+    if (FrameCapHasAuto()) {
+      // Auto rides its own flag; the pacer derives the rate from the display
+      // refresh live (window moves between monitors keep working).
+      SetBoolCvar("skate3_guest_fps_cap_auto", frame_cap_index_ == 0);
+    }
+    const double cap_fps =
+        frame_cap_index_ >= rate_base && frame_cap_index_ < FrameCapUnlimitedIndex()
+            ? kFrameCapRates[frame_cap_index_ - rate_base]
+            : 0.0;
+    rex::cvar::SetFlagByName("skate3_guest_fps_cap", std::to_string(cap_fps));
+    // Never run both pacers: the host limiter waits on the paint thread
+    // without backpressuring the guest, so presents drop frames on an
+    // irregular beat: the judder the guest cap exists to remove.
+    if (HasHostFrameCapCvars()) {
+      SetBoolCvar("d3d12_present_frame_limiter", false);
+    }
+  } else if (HasHostFrameCapCvars()) {
+    const bool capped = frame_cap_index_ < FrameCapUnlimitedIndex();
+    SetBoolCvar("d3d12_present_frame_limiter", capped);
+    if (capped) {
+      rex::cvar::SetFlagByName(
+          "d3d12_present_frame_limiter_fps",
+          std::to_string(kFrameCapRates[frame_cap_index_ - FrameCapRateBaseIndex()]));
+    }
+  }
+}
+
 void SimpleSettingsDialog::SaveVideo() {
   resolution_scale_index_ =
       std::clamp(resolution_scale_index_, 0, static_cast<int>(kResolutionScales.size()) - 1);
@@ -1263,33 +1296,7 @@ void SimpleSettingsDialog::SaveVideo() {
   rex::cvar::SetFlagByName("resolution_scale", scale);
   rex::cvar::SetFlagByName("draw_resolution_scale_x", scale);
   rex::cvar::SetFlagByName("draw_resolution_scale_y", scale);
-  if (UseGuestFrameCap()) {
-    const int rate_base = FrameCapRateBaseIndex();
-    if (FrameCapHasAuto()) {
-      // Auto rides its own flag; the pacer derives the rate from the display
-      // refresh live (window moves between monitors keep working).
-      SetBoolCvar("skate3_guest_fps_cap_auto", frame_cap_index_ == 0);
-    }
-    const double cap_fps =
-        frame_cap_index_ >= rate_base && frame_cap_index_ < FrameCapUnlimitedIndex()
-            ? kFrameCapRates[frame_cap_index_ - rate_base]
-            : 0.0;
-    rex::cvar::SetFlagByName("skate3_guest_fps_cap", std::to_string(cap_fps));
-    // Never run both pacers: the host limiter waits on the paint thread
-    // without backpressuring the guest, so presents drop frames on an
-    // irregular beat: the judder the guest cap exists to remove.
-    if (HasHostFrameCapCvars()) {
-      SetBoolCvar("d3d12_present_frame_limiter", false);
-    }
-  } else if (HasHostFrameCapCvars()) {
-    const bool capped = frame_cap_index_ < FrameCapUnlimitedIndex();
-    SetBoolCvar("d3d12_present_frame_limiter", capped);
-    if (capped) {
-      rex::cvar::SetFlagByName(
-          "d3d12_present_frame_limiter_fps",
-          std::to_string(kFrameCapRates[frame_cap_index_ - FrameCapRateBaseIndex()]));
-    }
-  }
+  ApplyFrameCap();
   SetBoolCvar("fullscreen", fullscreen_);
   if (HasCvar("skate3_display_aspect_mode")) {
     rex::cvar::SetFlagByName("skate3_display_aspect_mode",
@@ -1523,10 +1530,17 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         }
         row.options.push_back(kFrameCapLabels[0]);
         row.index = &frame_cap_index_;
+        row.on_enum_change = [this](int value) {
+          frame_cap_index_ = std::clamp(value, 0, FrameCapUnlimitedIndex());
+          ApplyFrameCap();
+          SaveSimpleSettingsConfig(config_path_);
+        };
         row.reset = [this] {
           if (FrameCapHasAuto() &&
               CvarDefaultBool("skate3_guest_fps_cap_auto", false)) {
             frame_cap_index_ = 0;
+            ApplyFrameCap();
+            SaveSimpleSettingsConfig(config_path_);
             return;
           }
           double rate = 0.0;
@@ -1536,6 +1550,8 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
             rate = CvarDefaultDouble("d3d12_present_frame_limiter_fps", 0.0);
           }
           frame_cap_index_ = FrameCapIndexFromRate(rate);
+          ApplyFrameCap();
+          SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));
       }
