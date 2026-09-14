@@ -82,10 +82,12 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 40> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 42> kOptionalSimpleSettingsCvars = {
     "skate3_native_render_lw_update_refresh",
     "skate3_native_render_guest_static_refresh",
-    "skate3_native_render_scene_handheld_potato",
+    "skate3_native_render_scene_merge_draws",
+    "skate3_native_render_scene_hair_single_pass",
+    "skate3_native_render_scene_water_effects",
     "skate3_native_render_scene_vegetation",
     "skate3_native_render_scene_ambient_npcs",
     "skate3_native_render_scene_movable_props",
@@ -1129,9 +1131,12 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
       NearestRateIndex(kNpcUpdateRates, "skate3_native_render_lw_update_refresh");
   world_refresh_index_ =
       NearestRateIndex(kWorldRefreshRates, "skate3_native_render_guest_static_refresh");
-  world_detail_full_ =
-      HasCvar("skate3_native_render_scene_handheld_potato") &&
-      !rex::cvar::Query<bool>("skate3_native_render_scene_handheld_potato");
+  merge_draws_ = HasCvar("skate3_native_render_scene_merge_draws") &&
+                 rex::cvar::Query<bool>("skate3_native_render_scene_merge_draws");
+  hair_full_ = !HasCvar("skate3_native_render_scene_hair_single_pass") ||
+               !rex::cvar::Query<bool>("skate3_native_render_scene_hair_single_pass");
+  water_effects_ = !HasCvar("skate3_native_render_scene_water_effects") ||
+                   rex::cvar::Query<bool>("skate3_native_render_scene_water_effects");
   vegetation_ = !HasCvar("skate3_native_render_scene_vegetation") ||
                 rex::cvar::Query<bool>("skate3_native_render_scene_vegetation");
   ambient_npcs_ = !HasCvar("skate3_native_render_scene_ambient_npcs") ||
@@ -1902,29 +1907,70 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
       }
 #if REX_PLATFORM_ANDROID
       header("Low-End Devices");
-      // Remaining lean shortcuts with no row of their own yet: coalesced
-      // draw islands, single-pass hair, skipped shadow/outline/spline
-      // pipelines and cheaper water probes.
-      if (HasCvar("skate3_native_render_scene_handheld_potato")) {
+      if (HasCvar("skate3_native_render_scene_merge_draws")) {
         RowSpec row;
         row.kind = RowSpec::kEnum;
-        row.label = "World Detail";
+        row.label = "Draw Batching";
         row.desc =
-            "Simplified enables the remaining handheld shortcuts: merged draw "
-            "batches, single-pass hair, cheaper water probes, and no shadow, "
-            "outline or spline pipelines, so shadow settings only take effect "
-            "on Full. The content rows below are independent of this switch.";
-        row.options = {"Simplified (fast)", "Full"};
-        row.flag = &world_detail_full_;
+            "Merge neighbouring pieces of one material into a single draw, "
+            "drawing a few extra hidden triangles instead of issuing another "
+            "command. Saves CPU in dense areas. Applies to geometry loaded "
+            "after the change.";
+        row.options = {"Off", "On"};
+        row.flag = &merge_draws_;
         row.on_enum_change = [this](int value) {
-          world_detail_full_ = value != 0;
-          SetBoolCvar("skate3_native_render_scene_handheld_potato",
-                      !world_detail_full_);
+          merge_draws_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_merge_draws", merge_draws_);
           SaveSimpleSettingsConfig(config_path_);
         };
         row.reset = [this] {
-          world_detail_full_ = true;
-          SetBoolCvar("skate3_native_render_scene_handheld_potato", false);
+          merge_draws_ = false;
+          SetBoolCvar("skate3_native_render_scene_merge_draws", false);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_hair_single_pass")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Hair Detail";
+        row.desc =
+            "Full draws hair in the game's two passes so far strands never "
+            "show through near ones. Single Pass halves the draw cost of every "
+            "head in view; hair may look noisier up close. Applies immediately.";
+        row.options = {"Single Pass", "Full"};
+        row.flag = &hair_full_;
+        row.on_enum_change = [this](int value) {
+          hair_full_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_hair_single_pass", !hair_full_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          hair_full_ = true;
+          SetBoolCvar("skate3_native_render_scene_hair_single_pass", false);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_water_effects")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Water Effects";
+        row.desc =
+            "Full renders water, ocean, reflections and scrolling surfaces "
+            "through their own effect paths. Simple draws them as plain "
+            "materials, which is cheaper on both CPU and GPU. Applies "
+            "immediately.";
+        row.options = {"Simple", "Full"};
+        row.flag = &water_effects_;
+        row.on_enum_change = [this](int value) {
+          water_effects_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_water_effects", water_effects_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          water_effects_ = true;
+          SetBoolCvar("skate3_native_render_scene_water_effects", true);
           SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));

@@ -80,7 +80,7 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_fmv_native);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_fmv_yield);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_hdr);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_hdr_packed);
-REXCVAR_DECLARE(bool, skate3_native_render_scene_handheld_potato);
+REXCVAR_DECLARE(bool, skate3_native_render_scene_hair_single_pass);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_vegetation);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_ambient_npcs);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_movable_props);
@@ -4129,11 +4129,9 @@ bool EnsureFallbackTextures(const NativeGuestOutputRenderContext& context) {
     g_r.white.valid = true;
   }
   if (!g_r.neutral_lightmap.valid) {
-    // The handheld potato profile intentionally discards guest lightmaps.
-    // Binding the ordinary white fallback makes exact world shaders run at
-    // full baked brightness and washes out the base diffuse. A single shared
-    // neutral texel preserves useful contrast at effectively zero memory and
-    // upload cost, without reintroducing guest texture resolves or streaming.
+    // With World Texture Layers off guest lightmaps are discarded. The white
+    // fallback would run exact world shaders at full baked brightness and wash
+    // out the diffuse; one shared neutral texel keeps the contrast.
     nrhi::TextureDesc desc;
     desc.width = 1;
     desc.height = 1;
@@ -4570,20 +4568,11 @@ bool EnsurePipeline(const NativeGuestOutputRenderContext& context) {
   uint32_t msaa_want =
       msaa_req >= 8 ? 8u : msaa_req >= 4 ? 4u : msaa_req >= 2 ? 2u : 1u;
   msaa_want = device->GetSupportedSampleCount(scene_fmt_want, msaa_want);
-  // A lean Android scene never executes the optional passes; follow the scene
-  // feature flag so a live World Detail change rebuilds the family.
-#if REX_PLATFORM_ANDROID
-  const bool lean_android_pipelines =
-      REXCVAR_GET(skate3_native_render_scene_handheld_potato);
-#else
-  constexpr bool lean_android_pipelines = false;
-#endif
   if (!g_r.pso || g_r.rtv_format != context.guest_output->format() ||
       g_r.hdr_active != hdr_want ||
       (hdr_want && g_r.hdr_scene_format != hdr_fmt_want) ||
       g_r.msaa != msaa_want ||
-      g_r.showcase_shaders != g_r.showcase_shaders_want ||
-      g_r.lean_pipelines != lean_android_pipelines) {
+      g_r.showcase_shaders != g_r.showcase_shaders_want) {
     if (g_r.msaa != msaa_want && g_r.pfx_ready) {
       // The photo-postfx depth-pack pass is compiled against the depth
       // buffer's sample count (PFX_MSAA variant); retire the chain's PSOs
@@ -4600,13 +4589,10 @@ bool EnsurePipeline(const NativeGuestOutputRenderContext& context) {
     g_r.hdr_scene_format = hdr_fmt_want;
     g_r.msaa = msaa_want;
     g_r.showcase_shaders = g_r.showcase_shaders_want;
-    g_r.lean_pipelines = lean_android_pipelines;
     if (!EnsureScenePsoFamily(context) || !EnsureResolvePso(context) ||
-        !EnsureBlurPsos(context) ||
-        (!lean_android_pipelines && !EnsureOutlineEdgePso(context)) ||
-        !Ensure2dPso(context) ||
-        (!lean_android_pipelines && !EnsureSplinePsos(context)) ||
-        (!lean_android_pipelines && !EnsureShadowPsos(context))) {
+        !EnsureBlurPsos(context) || !EnsureOutlineEdgePso(context) ||
+        !Ensure2dPso(context) || !EnsureSplinePsos(context) ||
+        !EnsureShadowPsos(context)) {
       if (g_r.showcase_shaders) {
         // A showcase-variant build failure must not pin the sticky failure
         // latch: drop the swap request so the F5 retry rebuilds the
@@ -4617,10 +4603,9 @@ bool EnsurePipeline(const NativeGuestOutputRenderContext& context) {
       }
       return false;
     }
-    REXLOG_INFO("native-scene: pipelines created (MSAA x{}, {}{}{})", g_r.msaa,
+    REXLOG_INFO("native-scene: pipelines created (MSAA x{}, {}{})", g_r.msaa,
                 g_r.hdr_active ? "HDR" : "classic",
-                g_r.showcase_shaders ? ", showcase variants" : "",
-                lean_android_pipelines ? ", lean Android set" : "");
+                g_r.showcase_shaders ? ", showcase variants" : "");
     g_r.rtv_format = context.guest_output->format();
   }
 
@@ -4971,7 +4956,7 @@ void ProcessPrewarmEntry(uint8_t* base, const PrewarmEntry& e) {
     return;
   }
   {
-    // Mirrors HandheldPotatoDrops: every content cut follows its own setting.
+    // Mirrors ContentSettingsDrop: every content cut follows its own setting.
     const bool vegetation = item.env_family == 7 || item.env_family == 9 ||
                             item.env_family == 10 || item.transparent ||
                             item.env_family == 13;
@@ -10661,10 +10646,8 @@ bool RenderScene(const NativeGuestOutputRenderContext& context, void* /*user_dat
       const bool hair = item->char_family >= 4 && item->char_family <= 5 &&
                         item->char_rows[14 * 4 + 1] > 0.0f;
       if (hair && use_depth && g_r.pso_hair_a != nullptr && g_r.pso_hair_b != nullptr) {
-        if (REXCVAR_GET(skate3_native_render_scene_handheld_potato)) {
-          // The desktop path layers opposing cull passes for far/near hair
-          // strands. One coverage pass is sufficient at 360p and halves the
-          // CPU draw cost of every hair item.
+        if (REXCVAR_GET(skate3_native_render_scene_hair_single_pass)) {
+          // One coverage pass instead of the two cull passes below.
           cmd->SetPipeline(g_r.pso_hair_a);
           timed_draw(*item);
           cmd->SetPipeline(blend_bound);

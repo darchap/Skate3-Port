@@ -120,7 +120,9 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   char gamertag_buf_[32] = {};
   // Live setting values (hot cvars, applied and saved on change).
   int android_scene_res_index_ = 4;  // 960 x 540
-  bool world_detail_full_ = true;
+  bool merge_draws_ = false;
+  bool hair_full_ = true;
+  bool water_effects_ = true;
   int npc_update_rate_index_ = 0;   // every frame
   int world_refresh_index_ = 0;     // every frame
   bool vegetation_ = true;

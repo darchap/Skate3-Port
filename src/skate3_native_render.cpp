@@ -37,7 +37,6 @@ REXCVAR_DEFINE_INT32(skate3_native_render_log_interval, 0, "Skate 3",
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_perf_log);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_occlusion_cull_guest);
-REXCVAR_DECLARE(bool, skate3_native_render_scene_handheld_potato);
 REXCVAR_DECLARE(bool, skate3_mp_enabled);
 REXCVAR_DEFINE_INT32(
     skate3_native_render_guest_static_refresh, 1,
