@@ -50,6 +50,12 @@ constexpr std::array<int32_t, 8> kAndroidSceneResHeights = {
     288, 360, 432, 480, 540, 612, 648, 720};
 constexpr std::array<int32_t, 8> kAndroidSceneResWidths = {
     512, 640, 768, 854, 960, 1088, 1152, 1280};
+constexpr std::array<const char*, 4> kNpcUpdateRateLabels = {
+    "Every Frame (Original)", "Every 2nd Frame", "Every 3rd Frame", "Every 4th Frame"};
+constexpr std::array<int32_t, 4> kNpcUpdateRates = {1, 2, 3, 4};
+constexpr std::array<const char*, 4> kWorldRefreshLabels = {
+    "Every Frame (Original)", "Every 2nd Frame", "Every 4th Frame", "Every 8th Frame"};
+constexpr std::array<int32_t, 4> kWorldRefreshRates = {1, 2, 4, 8};
 #else
 constexpr std::array<int32_t, 3> kResolutionScales = {1, 2, 3};
 constexpr std::array<const char*, 3> kResolutionLabels = {"720p (1x)", "1440p (2x)",
@@ -76,7 +82,9 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 38> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 40> kOptionalSimpleSettingsCvars = {
+    "skate3_native_render_lw_update_refresh",
+    "skate3_native_render_guest_static_refresh",
     "skate3_native_render_scene_handheld_potato",
     "skate3_native_render_scene_vegetation",
     "skate3_native_render_scene_ambient_npcs",
@@ -359,6 +367,17 @@ int ResolutionIndexFromCvar() {
 }
 
 #if REX_PLATFORM_ANDROID
+template <size_t N>
+int NearestRateIndex(const std::array<int32_t, N>& rates, const char* cvar) {
+  if (!HasCvar(cvar)) return 0;
+  const int32_t value = rex::cvar::Query<int32_t>(cvar);
+  int best = 0;
+  for (int i = 1; i < static_cast<int>(N); ++i) {
+    if (std::abs(rates[i] - value) < std::abs(rates[best] - value)) best = i;
+  }
+  return best;
+}
+
 int AndroidQualityProfileIndexFromCvar() {
   return HasCvar("skate3_android_quality_profile")
              ? std::clamp(
@@ -1106,6 +1125,10 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
 #if REX_PLATFORM_ANDROID
   android_quality_profile_index_ = AndroidQualityProfileIndexFromCvar();
   android_scene_res_index_ = AndroidSceneResIndexFromCvar();
+  npc_update_rate_index_ =
+      NearestRateIndex(kNpcUpdateRates, "skate3_native_render_lw_update_refresh");
+  world_refresh_index_ =
+      NearestRateIndex(kWorldRefreshRates, "skate3_native_render_guest_static_refresh");
   world_detail_full_ =
       HasCvar("skate3_native_render_scene_handheld_potato") &&
       !rex::cvar::Query<bool>("skate3_native_render_scene_handheld_potato");
@@ -2021,6 +2044,55 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
           SetBoolCvar("skate3_native_render_scene_lightmaps", true);
           SetBoolCvar("skate3_native_render_scene_macro", true);
           SetBoolCvar("skate3_native_render_scene_decals", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_lw_update_refresh")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "NPC Update Rate";
+        row.desc =
+            "How often pedestrians and traffic advance their simulation. Updates "
+            "are spread across frames, so lower rates flatten crowd frame spikes "
+            "without changing how many NPCs appear. Applies immediately.";
+        for (const char* label : kNpcUpdateRateLabels) row.options.push_back(label);
+        row.index = &npc_update_rate_index_;
+        row.on_enum_change = [this](int value) {
+          npc_update_rate_index_ =
+              std::clamp(value, 0, static_cast<int>(kNpcUpdateRates.size()) - 1);
+          rex::cvar::SetFlagByName("skate3_native_render_lw_update_refresh",
+                                   std::to_string(kNpcUpdateRates[npc_update_rate_index_]));
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          npc_update_rate_index_ = 0;
+          rex::cvar::SetFlagByName("skate3_native_render_lw_update_refresh", "1");
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_guest_static_refresh")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "World Update Rate";
+        row.desc =
+            "How often draw lists for static world geometry are rebuilt; cached "
+            "lists are replayed in between and moving objects always refresh. "
+            "Lower rates save CPU; newly streamed geometry appears a fraction of "
+            "a second later. Applies immediately.";
+        for (const char* label : kWorldRefreshLabels) row.options.push_back(label);
+        row.index = &world_refresh_index_;
+        row.on_enum_change = [this](int value) {
+          world_refresh_index_ =
+              std::clamp(value, 0, static_cast<int>(kWorldRefreshRates.size()) - 1);
+          rex::cvar::SetFlagByName("skate3_native_render_guest_static_refresh",
+                                   std::to_string(kWorldRefreshRates[world_refresh_index_]));
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          world_refresh_index_ = 0;
+          rex::cvar::SetFlagByName("skate3_native_render_guest_static_refresh", "1");
           SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));

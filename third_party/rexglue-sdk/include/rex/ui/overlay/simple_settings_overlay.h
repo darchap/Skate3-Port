@@ -121,6 +121,8 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   // Live setting values (hot cvars, applied and saved on change).
   int android_scene_res_index_ = 4;  // 960 x 540
   bool world_detail_full_ = true;
+  int npc_update_rate_index_ = 0;   // every frame
+  int world_refresh_index_ = 0;     // every frame
   bool vegetation_ = true;
   bool ambient_npcs_ = true;
   bool movable_props_ = true;

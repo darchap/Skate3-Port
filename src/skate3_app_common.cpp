@@ -634,8 +634,6 @@ void Skate3BaseApp::OnConfigurePaths(rex::PathConfig& paths) {
   // user-facing setting is deliberately absent so the saved settings file wins.
   constexpr std::pair<std::string_view, std::string_view> kAndroidBaseline[] = {
       {"native_render_suppress_mode", "1"},
-      {"skate3_native_render_guest_static_refresh", "8"},
-      {"skate3_native_render_lw_update_refresh", "1"},
       {"skate3_native_render_scene_ssr", "false"},
       {"skate3_native_render_scene_hdr", "false"},
       {"skate3_native_render_scene_smooth_camera", "false"},
