@@ -249,6 +249,15 @@ X_STATUS GraphicsSystem::SetupGuestGpu(runtime::FunctionDispatcher* function_dis
             chrono::Clock::QueryHostTickCount() +
             (REXCVAR_GET(vsync) ? vsync_interval_host_ticks : no_vsync_interval_host_ticks);
         while (vsync_worker_running_) {
+          // Background gate: no vblank, the guest frame loop parks. A slow 10 Hz
+          // heartbeat instead crashed the title (it used a timing value as a callback
+          // pointer); pacing is done in Presenter::RefreshGuestOutput.
+          if (paused_ || background_paused_) {
+            rex::thread::Sleep(std::chrono::milliseconds(50));
+            next_frame_host_tick = chrono::Clock::QueryHostTickCount();
+            next_frame_time = chrono::Clock::QueryGuestTickCount();
+            continue;
+          }
           if (REXCVAR_GET(vblank_host_clock_pacing)) {
             bool vsync_enabled = REXCVAR_GET(vsync);
             no_vsync_interval_ticks = get_no_vsync_interval_ticks(guest_tick_frequency);

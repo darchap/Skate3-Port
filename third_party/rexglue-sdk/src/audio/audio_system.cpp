@@ -165,6 +165,15 @@ void AudioSystem::WorkerThreadMain() {
   constexpr uint64_t kCreditPeriodNs = 256ull * 1000000000ull / 48000ull;
   uint64_t next_dispatch_ns[kMaximumClientCount] = {};
   while (worker_running_) {
+    // Park here when paused, whichever handle woke the worker. Checking only on
+    // the shutdown handle never triggered (the client semaphore always wins) and
+    // Pause() blocked forever.
+    if (paused_.load(std::memory_order_acquire)) {
+      pause_fence_.Signal();
+      thread::Wait(resume_event_.get(), false);
+      continue;
+    }
+
     // These handles signify the number of submitted samples. Once we reach
     // 64 samples, we wait until our audio backend releases a semaphore
     // (signaling a sample has finished playing)
@@ -182,12 +191,7 @@ void AudioSystem::WorkerThreadMain() {
     }
 
     if (result.first == thread::WaitResult::kSuccess && result.second == kMaximumClientCount) {
-      // Shutdown event signaled.
-      if (paused_) {
-        pause_fence_.Signal();
-        thread::Wait(resume_event_.get(), false);
-      }
-
+      // Shutdown event signaled; the pause handshake lives at the top of the loop.
       continue;
     }
 

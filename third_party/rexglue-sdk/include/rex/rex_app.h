@@ -27,6 +27,7 @@
 #if REX_PLATFORM_MAC
 #include <rex/system/xthread.h>
 #endif
+#include <rex/ui/app_lifecycle_listener.h>
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
 #include <rex/ui/immediate_drawer.h>
@@ -91,7 +92,10 @@ class SettingsDialog;
 ///   #include "my_app_app.h"
 ///   REX_DEFINE_APP(my_app, MyApp::Create)
 /// @endcode
-class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::WindowInputListener {
+class ReXApp : public ui::WindowedApp,
+               public ui::WindowListener,
+               public ui::WindowInputListener,
+               public ui::AppLifecycleListener {
  public:
   ~ReXApp() override;
 
@@ -213,6 +217,11 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
 
   // WindowListener overrides
   void OnClosing(ui::UIEvent& e) override;
+
+  // AppLifecycleListener overrides (mobile background/foreground; UI thread)
+  void OnAppEnterBackground() override;
+  void OnAppEnterForeground() override;
+  void OnAppTerminating() override;
 
   // WindowInputListener overrides
   void OnKeyDown(ui::KeyEvent& e) override;

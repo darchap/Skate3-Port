@@ -349,6 +349,14 @@ class Window {
 
   void SetPresenter(Presenter* presenter);
 
+  // UI thread: the platform surface was destroyed (false) or may exist again
+  // (true). Android tears it down on background and recreates it on foreground.
+  void NotifySurfaceChanged(bool new_surface_potentially_exists) {
+    OnSurfaceChanged(new_surface_potentially_exists);
+  }
+
+  bool HasPresenterSurface() const { return presenter_surface_ != nullptr; }
+
   // Request repainting of the surface. Can be called from non-UI threads as
   // long as they know the Surface exists and isn't in the middle of being
   // changed to another (the synchronization of this fact between the UI thread

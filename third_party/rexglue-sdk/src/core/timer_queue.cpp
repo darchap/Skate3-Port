@@ -105,6 +105,14 @@ class TimerQueue {
                     WaitItem::State::kInCallbackSelfDisarmed) {
               // Item is recurring and didn't self-disarm during callback:
               wait_item->due_ += wait_item->interval_;
+              // Skip missed periods instead of replaying them: the clock is steady and keeps
+              // running while the process is stopped (Android freezer), and replaying every
+              // period on resume ran the guest in slow motion.
+              const auto now = clock::now();
+              if (wait_item->due_ <= now) {
+                const auto behind = now - wait_item->due_;
+                wait_item->due_ += wait_item->interval_ * (behind / wait_item->interval_ + 1);
+              }
               wait_item->state_.store(WaitItem::State::kIdle, std::memory_order_release);
               wait_item->state_.notify_all();
               wait_items.push_front(std::move(wait_item));

@@ -89,6 +89,8 @@ class GraphicsSystem : public system::IGraphicsSystem {
 
   bool is_paused() const { return paused_; }
   void Pause();
+  // Background gate: stops the vblank source only.
+  void SetBackgroundPaused(bool paused) override { background_paused_.store(paused); }
   void Resume();
 
   bool Save(::rex::stream::ByteStream* stream);
@@ -129,7 +131,8 @@ class GraphicsSystem : public system::IGraphicsSystem {
   RegisterFile register_file_;
   std::unique_ptr<CommandProcessor> command_processor_;
 
-  bool paused_ = false;
+  std::atomic<bool> paused_{false};
+  std::atomic<bool> background_paused_{false};
 
  private:
   std::unique_ptr<::rex::ui::Presenter> presenter_;

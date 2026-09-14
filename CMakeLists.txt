@@ -269,6 +269,7 @@ include(cmake/CodegenTargets.cmake)
 
 set(SKATE3_COMMON_SOURCES
     src/exception_compat.cpp
+    src/skate3_android_lifecycle.cpp
     src/skate3_app_common.cpp
     src/skate3_demo_path.cpp
     src/skate3_draw_distance.cpp

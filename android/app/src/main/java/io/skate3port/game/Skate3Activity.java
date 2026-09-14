@@ -1,5 +1,6 @@
 package io.skate3port.game;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.InputDevice;
@@ -8,12 +9,69 @@ import android.view.MotionEvent;
 import android.view.ViewGroup;
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLControllerManager;
+import org.libsdl.app.SDLSurface;
 
 
 public class Skate3Activity extends SDLActivity {
     private static final String INPUT_TAG = "Skate3Input";
     private static volatile boolean sessionActive;
     private TouchControllerView touchController;
+
+    // Set the instant the Activity pauses, before the surface can be destroyed.
+    // The runtime clears it on foreground.
+    private static native void nativeSetBackgrounded(boolean backgrounded);
+    // Raised once a resume has a surface; covers the pause+resume pair SDL drops
+    // when both land before its first event pump.
+    private static native void nativeNotifyResumed();
+    // Only a reported pause may raise the request: the first surfaceChanged at
+    // launch (which starts the SDL thread) must not.
+    private static boolean resumePending;
+
+    private static void raiseForegroundRequest() {
+        if (!resumePending) return;
+        resumePending = false;
+        notifyResumedSafe();
+    }
+
+    private static void setBackgroundedSafe(boolean backgrounded) {
+        try {
+            nativeSetBackgrounded(backgrounded);
+        } catch (UnsatisfiedLinkError e) {
+        }
+    }
+
+    private static void notifyResumedSafe() {
+        try {
+            nativeNotifyResumed();
+        } catch (UnsatisfiedLinkError e) {
+        }
+    }
+
+    // Raise the request only once the new ANativeWindow exists, like SDL's own
+    // resume; earlier would rebuild the surface onto a released window.
+    static final class Skate3Surface extends SDLSurface {
+        Skate3Surface(Context context) {
+            super(context);
+        }
+
+        boolean isReady() {
+            return mIsSurfaceReady;
+        }
+
+        @Override
+        public void surfaceChanged(android.view.SurfaceHolder holder,
+                                   int format, int width, int height) {
+            super.surfaceChanged(holder, format, width, height);
+            if (mIsResumedCalled && mIsSurfaceReady) {
+                raiseForegroundRequest();
+            }
+        }
+    }
+
+    @Override
+    protected SDLSurface createSDLSurface(Context context) {
+        return new Skate3Surface(context);
+    }
 
     static boolean isSessionActive() {
         return sessionActive;
@@ -36,13 +94,29 @@ public class Skate3Activity extends SDLActivity {
         nativeSetenv("SKATE3_VULKAN_DRIVER_DIR", "");
         nativeSetenv("SKATE3_VULKAN_DRIVER_NAME", "");
         Log.i("Skate3GpuDriver", "Selected system driver");
+        GameKeepAliveService.start(this);
         touchController = new TouchControllerView(this);
         mLayout.addView(touchController, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // Surface survived the pause: no surfaceChanged will follow.
+        if (mSurface instanceof Skate3Surface && ((Skate3Surface) mSurface).isReady()) {
+            raiseForegroundRequest();
+        }
+    }
+
+    @Override
     protected void onPause() {
+        // Before the SDL thread exists SDL sends no pause/resume; a flag set here
+        // would never be cleared.
+        if (mSDLThread != null) {
+            setBackgroundedSafe(true);
+            resumePending = true;
+        }
         if (touchController != null) touchController.clearInput();
         super.onPause();
     }
@@ -50,6 +124,7 @@ public class Skate3Activity extends SDLActivity {
     @Override
     protected void onDestroy() {
         sessionActive = false;
+        GameKeepAliveService.stop(this);
         if (touchController != null) touchController.disconnect();
         super.onDestroy();
     }

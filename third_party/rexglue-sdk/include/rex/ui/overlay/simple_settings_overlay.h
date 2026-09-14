@@ -78,6 +78,8 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   bool HasSettingsChanges() const;
   void ReloadProfiles();
   void SaveVideo();
+  // Frame cap applies live (hot-reload cvars), no restart.
+  void ApplyFrameCap();
   void SaveProfile();
   void ApplyAndRestart();
 
