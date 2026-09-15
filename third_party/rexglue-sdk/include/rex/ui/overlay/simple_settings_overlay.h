@@ -138,8 +138,8 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   bool volumetrics_ = true;
   int draw_distance_index_ = 1;
   int stream_probe_index_ = 0;
-  bool mode_indicator_ = true;
   bool fps_counter_ = false;
+  bool fps_percentiles_ = false;
   bool audio_mute_ = false;
   bool rumble_ = true;
   bool penguin_mod_ = false;

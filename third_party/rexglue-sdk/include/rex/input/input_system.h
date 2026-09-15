@@ -56,6 +56,8 @@ class InputSystem : public system::IInputSystem {
   std::function<bool()> active_callback_ = nullptr;
   std::function<void()> menu_chord_callback_ = nullptr;
   bool menu_chord_down_ = false;
+  bool chord_swallow_ = false;
+  bool release_latch_ = false;
 };
 
 /// Create a default InputSystem with SDL + NOP drivers.

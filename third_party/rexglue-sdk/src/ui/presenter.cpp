@@ -16,6 +16,7 @@
 #include <rex/thread.h>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 #include <rex/assert.h>
 #include <rex/cvar.h>
@@ -869,6 +870,38 @@ Presenter::GuestFrameStats Presenter::GetGuestFrameStats() const {
     // measure, keep the frame-count estimate.
     stats.fps = double(frames_in_window) / span_to_now_seconds;
     stats.frame_time_ms = 1000.0 / stats.fps;
+  }
+  // Percentiles use a longer window than the average so 1% is more than one
+  // frame; intervals are between consecutive timestamps, newest first.
+  const std::chrono::steady_clock::time_point pct_start = now - std::chrono::seconds(4);
+  std::vector<double> intervals_ms;
+  intervals_ms.reserve(guest_frame_timestamp_count_);
+  std::chrono::steady_clock::time_point newer;
+  for (size_t i = 0; i < guest_frame_timestamp_count_; ++i) {
+    const size_t index =
+        (guest_frame_timestamp_next_ + kGuestFrameTimestampCount - 1 - i) %
+        kGuestFrameTimestampCount;
+    const std::chrono::steady_clock::time_point timestamp = guest_frame_timestamps_[index];
+    if (timestamp < pct_start) {
+      break;
+    }
+    if (i > 0) {
+      intervals_ms.push_back(
+          std::chrono::duration<double, std::milli>(newer - timestamp).count());
+    }
+    newer = timestamp;
+  }
+  if (!intervals_ms.empty()) {
+    std::sort(intervals_ms.begin(), intervals_ms.end());
+    const size_t n = intervals_ms.size();
+    stats.p95_ms = intervals_ms[std::min(n - 1, size_t(0.95 * double(n)))];
+    stats.p99_ms = intervals_ms[std::min(n - 1, size_t(0.99 * double(n)))];
+    const size_t worst = std::max<size_t>(1, n / 100);
+    double worst_sum = 0.0;
+    for (size_t i = n - worst; i < n; ++i) {
+      worst_sum += intervals_ms[i];
+    }
+    stats.low_1pct_fps = worst_sum > 0.0 ? 1000.0 * double(worst) / worst_sum : 0.0;
   }
   return stats;
 }

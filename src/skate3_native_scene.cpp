@@ -365,6 +365,24 @@ REXCVAR_DEFINE_DOUBLE(skate3_native_render_scene_showcase_wipe, 3.0, "Skate 3",
                       "screen.")
     .range(0.2, 30.0)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+// Frame-time benchmark: a scripted 70 s camera flythrough from a saved pose,
+// recorded by the render thread; one summary line lands in the session log.
+REXCVAR_DEFINE_INT32(skate3_benchmark_frames, 0, "Skate 3",
+                     "Record this many native-scene frame times (after the "
+                     "warmup) and log an avg/p50/p95/p99/max summary, then "
+                     "reset to 0.")
+    .range(0, 36000)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_INT32(skate3_benchmark_warmup, 120, "Skate 3",
+                     "Frames to skip after arming the benchmark before "
+                     "recording starts.")
+    .range(0, 3600)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_BOOL(skate3_bench_run, false, "Skate 3",
+                    "Run the scripted benchmark flythrough from the current "
+                    "camera pose. Set false to abort.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
 REXCVAR_DEFINE_BOOL(skate3_native_render_scene_freecam, false, "Skate 3",
                     "Detach the render camera from the game (drone / free-fly "
                     "cam): WASD fly, E/Space up, Q/C down, arrow keys or "
@@ -6600,6 +6618,152 @@ bool FreecamGuestPose(float out_pos[3]) {
   return true;
 }
 
+// Scripted benchmark flythrough: a deterministic path flown from the camera
+// pose at launch, through the freecam's guest-camera takeover so streaming
+// and culls recenter on the scripted camera like they do for the drone.
+struct BenchCamState {
+  bool running = false;
+  double t0 = 0.0;
+  double pos0[3] = {};
+  double yaw0 = 0.0, pitch0 = 0.0;
+  float sign_right = 1.0f, sign_up = 1.0f;
+  float proj0[16] = {};
+};
+BenchCamState g_benchcam;
+
+// Same derivation as the freecam's engage step.
+void BenchDerivePose(const float cam_view[16], BenchCamState& bc) {
+  const float f0[3] = {cam_view[2], cam_view[6], cam_view[10]};
+  bc.yaw0 = std::atan2(double(f0[0]), double(f0[2]));
+  bc.pitch0 = std::asin(std::clamp(double(f0[1]), -1.0, 1.0));
+  for (int j = 0; j < 3; ++j) {
+    bc.pos0[j] = -(cam_view[12] * cam_view[j * 4 + 0] +
+                   cam_view[13] * cam_view[j * 4 + 1] +
+                   cam_view[14] * cam_view[j * 4 + 2]);
+  }
+  bc.sign_right =
+      f0[2] * cam_view[0] - f0[0] * cam_view[8] >= 0.0f ? 1.0f : -1.0f;
+  const float r0[3] = {f0[2] * bc.sign_right, 0.0f, -f0[0] * bc.sign_right};
+  const float u0[3] = {f0[1] * r0[2] - f0[2] * r0[1],
+                       f0[2] * r0[0] - f0[0] * r0[2],
+                       f0[0] * r0[1] - f0[1] * r0[0]};
+  bc.sign_up =
+      u0[0] * cam_view[1] + u0[1] * cam_view[5] + u0[2] * cam_view[9] >= 0.0f
+          ? 1.0f
+          : -1.0f;
+}
+
+// Same math as the freecam's publish step.
+void BenchPublishPose(FrameScene& scene, const double pos[3], double yaw,
+                      double pitch, const BenchCamState& bc) {
+  const double cy = std::cos(yaw), sy = std::sin(yaw);
+  const double cp = std::cos(pitch), sp = std::sin(pitch);
+  const float fwd[3] = {float(sy * cp), float(sp), float(cy * cp)};
+  const float right[3] = {float(cy) * bc.sign_right, 0.0f,
+                          float(-sy) * bc.sign_right};
+  const float up[3] = {float(-sp * sy) * bc.sign_right * bc.sign_up,
+                       float(cp) * bc.sign_right * bc.sign_up,
+                       float(-sp * cy) * bc.sign_right * bc.sign_up};
+  float view[16] = {};
+  for (int i = 0; i < 3; ++i) {
+    view[i * 4 + 0] = right[i];
+    view[i * 4 + 1] = up[i];
+    view[i * 4 + 2] = fwd[i];
+  }
+  const float posf[3] = {float(pos[0]), float(pos[1]), float(pos[2])};
+  for (int k = 0; k < 3; ++k) {
+    view[12 + k] = -(posf[0] * view[0 * 4 + k] + posf[1] * view[1 * 4 + k] +
+                     posf[2] * view[2 * 4 + k]);
+  }
+  view[15] = 1.0f;
+  {
+    std::lock_guard<std::mutex> lock(g_freecam_guest_mutex);
+    std::memcpy(g_freecam_guest_view, view, sizeof(view));
+    std::memcpy(g_freecam_guest_pos, posf, sizeof(posf));
+  }
+  g_freecam_guest_active.store(1, std::memory_order_release);
+  std::memcpy(scene.proj, bc.proj0, sizeof(bc.proj0));
+  for (int r = 0; r < 4; ++r) {
+    for (int col = 0; col < 4; ++col) {
+      float sum = 0.0f;
+      for (int k = 0; k < 4; ++k) {
+        sum += view[r * 4 + k] * bc.proj0[k * 4 + col];
+      }
+      scene.view_proj[r * 4 + col] = sum;
+    }
+  }
+  std::memcpy(scene.cam_pos, posf, sizeof(posf));
+}
+
+void BenchFinish(const char* reason, bool aborted) {
+  BenchCamState& bc = g_benchcam;
+  if (!bc.running) {
+    return;
+  }
+  bc.running = false;
+  g_freecam_guest_active.store(0, std::memory_order_release);
+  REXCVAR_SET(skate3_bench_run, false);
+  if (aborted) {
+    REXCVAR_SET(skate3_benchmark_frames, 0);
+  }
+  REXLOG_INFO("bench-cam: {}", reason);
+}
+
+// Guest render thread, where the freecam runs. Returns true while the
+// flythrough owns the camera (the freecam stays disengaged).
+bool UpdateBenchmarkCam(FrameScene& scene, const float cam_view[16],
+                        double now) {
+  BenchCamState& bc = g_benchcam;
+  if (!REXCVAR_GET(skate3_bench_run)) {
+    BenchFinish("aborted", true);
+    return false;
+  }
+  if (!bc.running) {
+    BenchDerivePose(cam_view, bc);
+    std::memcpy(bc.proj0, scene.proj, sizeof(bc.proj0));
+    REXCVAR_SET(skate3_native_render_scene_freecam, false);
+    bc.t0 = now;
+    if (REXCVAR_GET(skate3_benchmark_frames) <= 0) {
+      REXCVAR_SET(skate3_benchmark_frames, 2200);
+    }
+    bc.running = true;
+    REXLOG_INFO("bench-cam: flythrough started at ({:.1f}, {:.1f}, {:.1f})",
+                bc.pos0[0], bc.pos0[1], bc.pos0[2]);
+  }
+  // The path must stay inside the game's streamed bubble (near the skater and
+  // down the skater's line of sight; the takeover cannot force streaming
+  // elsewhere): small yaw sway, a dolly out and back, then a rise looking down.
+  constexpr double kPan = 20.0, kGlide = 25.0, kRise = 25.0;
+  constexpr double kLap = kPan + kGlide + kRise;
+  constexpr double kTwoPi = 6.28318530717958647692;
+  constexpr double kDeg = 3.14159265358979323846 / 180.0;
+  const double t = now - bc.t0;
+  if (t >= kLap) {
+    BenchFinish("flythrough complete", false);
+    return false;
+  }
+  const double fwd_flat[3] = {std::sin(bc.yaw0), 0.0, std::cos(bc.yaw0)};
+  double pos[3] = {bc.pos0[0], bc.pos0[1], bc.pos0[2]};
+  double yaw = bc.yaw0;
+  double pitch = bc.pitch0;
+  if (t < kPan) {
+    yaw = bc.yaw0 + 10.0 * kDeg * std::sin(kTwoPi * (t / kPan));
+  } else if (t < kPan + kGlide) {
+    const double u = (t - kPan) / kGlide;
+    const double d = 20.0 * std::sin(3.14159265358979323846 * u);
+    for (int j = 0; j < 3; ++j) {
+      pos[j] += fwd_flat[j] * d;
+    }
+    pitch = -5.0 * kDeg;
+  } else {
+    const double u = std::min((t - kPan - kGlide) / kRise, 1.0);
+    pos[1] += 12.0 * u;
+    pitch = (-5.0 + (-20.0 - -5.0) * u) * kDeg;
+  }
+  BenchPublishPose(scene, pos, yaw, pitch, bc);
+  return true;
+}
+
 bool LoadingOrFrontendActive() {
   if (rex::kernel::guest_presence::GameplayContextValue() != 0) {
     return false;
@@ -10366,8 +10530,13 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
   // wins while engaged. No draw-item union here; the SetViewMatrix
   // override hands the flown pose to the game, whose own culling then
   // submits exactly what the drone sees (statics AND animated entities).
-  UpdateFreecam(scene, cam_view,
-                std::chrono::duration<double>(build_t0.time_since_epoch()).count());
+  // The benchmark flythrough owns the camera while it runs.
+  if (!UpdateBenchmarkCam(
+          scene, cam_view,
+          std::chrono::duration<double>(build_t0.time_since_epoch()).count())) {
+    UpdateFreecam(scene, cam_view,
+                  std::chrono::duration<double>(build_t0.time_since_epoch()).count());
+  }
 
   // Host-owned playable-character mods run after every capture/rescue pass,
   // so none of the original CAC pieces can be reintroduced later this frame.

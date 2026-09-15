@@ -212,7 +212,24 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
   }
   menu_chord_down_ = menu_chord_down;
 
-  if (active_callback_ && !active_callback_()) {
+  // The overlay opens on the UI thread a few polls after the chord, and it
+  // closes while the confirming button is still held: without these latches
+  // the game sees Start on open and A on close.
+  const uint16_t buttons = static_cast<uint16_t>(merged.gamepad.buttons);
+  if (menu_chord_down) {
+    chord_swallow_ = true;
+  } else if ((buttons & menu_chord_buttons) == 0) {
+    chord_swallow_ = false;
+  }
+  const bool active = !active_callback_ || active_callback_();
+  if (!active) {
+    release_latch_ = true;
+  } else if (buttons == 0 && merged.gamepad.left_trigger < 30 &&
+             merged.gamepad.right_trigger < 30) {
+    // XInput's own trigger threshold: a worn trigger never rests at exactly 0.
+    release_latch_ = false;
+  }
+  if (!active || chord_swallow_ || release_latch_) {
     std::memset(&merged.gamepad, 0, sizeof(merged.gamepad));
   }
 
