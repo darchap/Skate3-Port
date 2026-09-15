@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace skate3::native_scene {
@@ -694,6 +695,18 @@ bool ToggleSceneEnabled();
 // the render-mode indicator can show the degraded state even though the
 // renderer cvars are still enabled.
 bool SceneFailed();
+
+// Last benchmark summary for the on-screen readout; valid is false when
+// there is none.
+struct BenchmarkResult {
+  bool valid = false;
+  uint32_t frames = 0;
+  double avg_ms = 0.0, p50_ms = 0.0, p95_ms = 0.0, p99_ms = 0.0, max_ms = 0.0;
+  uint32_t chars_avg = 0, chars_max = 0;
+  double battery_c = -1.0;
+};
+BenchmarkResult LastBenchmarkResult();
+void ClearBenchmarkResult();
 
 // Clears the sticky failure so the next frame retries the full pipeline
 // build (ToggleSceneEnabled calls this on re-enable: a transient allocation

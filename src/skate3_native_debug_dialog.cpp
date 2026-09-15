@@ -26,6 +26,8 @@ REXCVAR_DEFINE_BOOL(skate3_native_render_mode_indicator, false, "Skate 3",
 REXCVAR_DECLARE(bool, skate3_native_render);
 // Hot-reload feature gates (skate3_native_scene.cpp).
 REXCVAR_DECLARE(bool, skate3_native_render_scene);
+REXCVAR_DECLARE(int32_t, skate3_benchmark_frames);
+REXCVAR_DECLARE(bool, skate3_bench_run);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lightmaps);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_macro);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_decals);
@@ -1229,7 +1231,59 @@ void RenderModeIndicator::OnDraw(ImGuiIO& io) {
   const bool scene_off = !REXCVAR_GET(skate3_native_render) ||
                          !REXCVAR_GET(skate3_native_render_scene) ||
                          skate3::native_scene::SceneFailed();
-  if (!REXCVAR_GET(skate3_native_render_mode_indicator) && !scene_off) {
+  // BENCH shows for the whole flythrough; the recorder clears its frame
+  // count when the summary is logged, so the tag doubles as the done signal.
+  const bool bench_active = REXCVAR_GET(skate3_benchmark_frames) > 0 ||
+                            REXCVAR_GET(skate3_bench_run);
+  const skate3::native_scene::BenchmarkResult bench_result =
+      skate3::native_scene::LastBenchmarkResult();
+  const bool show_mode =
+      REXCVAR_GET(skate3_native_render_mode_indicator) || scene_off;
+  if (!show_mode && !bench_active && !bench_result.valid) {
+    return;
+  }
+  if (bench_result.valid && !bench_active) {
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    ImGui::Begin("##benchmark_result", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav);
+    const auto fps = [](double ms) { return ms > 0.0 ? 1000.0 / ms : 0.0; };
+    ImGui::PushFont(nullptr, 22.0f);
+    ImGui::TextUnformatted("Benchmark Result");
+    ImGui::PopFont();
+    ImGui::Spacing();
+    if (ImGui::BeginTable("##bench_table", 3, ImGuiTableFlags_SizingFixedFit)) {
+      const auto line = [&](const char* label, double ms) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(label);
+        ImGui::TableNextColumn();
+        ImGui::Text("%6.1f FPS", fps(ms));
+        ImGui::TableNextColumn();
+        ImGui::Text("%6.2f ms", ms);
+      };
+      line("Average", bench_result.avg_ms);
+      line("Median (p50)", bench_result.p50_ms);
+      line("p95", bench_result.p95_ms);
+      line("p99", bench_result.p99_ms);
+      line("Worst frame", bench_result.max_ms);
+      ImGui::EndTable();
+    }
+    ImGui::Spacing();
+    ImGui::Text("%u frames   characters avg %u, max %u", bench_result.frames,
+                bench_result.chars_avg, bench_result.chars_max);
+    if (bench_result.battery_c >= 0.0) {
+      ImGui::Text("Battery %.1f C", bench_result.battery_c);
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("OK", ImVec2(120.0f, 0.0f))) {
+      skate3::native_scene::ClearBenchmarkResult();
+    }
+    ImGui::End();
+  }
+  if (!show_mode && !bench_active) {
     return;
   }
   // Pre-runtime (installer wizards) no guest frame exists yet - there is no
@@ -1250,9 +1304,14 @@ void RenderModeIndicator::OnDraw(ImGuiIO& io) {
                    ImGuiWindowFlags_AlwaysAutoResize |
                    ImGuiWindowFlags_NoSavedSettings |
                    ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
-  ImGui::TextColored(native ? ImVec4(0.35f, 1.0f, 0.45f, 1.0f)
-                            : ImVec4(1.0f, 0.65f, 0.25f, 1.0f),
-                     "%s", native ? "NATIVE" : "EMULATED");
+  if (bench_active) {
+    ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "BENCH");
+  }
+  if (show_mode) {
+    ImGui::TextColored(native ? ImVec4(0.35f, 1.0f, 0.45f, 1.0f)
+                              : ImVec4(1.0f, 0.65f, 0.25f, 1.0f),
+                       "%s", native ? "NATIVE" : "EMULATED");
+  }
   ImGui::End();
 }
 

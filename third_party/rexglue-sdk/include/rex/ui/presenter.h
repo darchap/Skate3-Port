@@ -366,6 +366,11 @@ class Presenter {
     double gpu_draw_ms = 0.0;
     double gpu_resolve_ms = 0.0;
     double gpu_dump_ms = 0.0;
+    // Frame-interval percentiles over the last four seconds (zero until two
+    // frames exist): the mean of the slowest 1% as FPS, and p95/p99 in ms.
+    double low_1pct_fps = 0.0;
+    double p95_ms = 0.0;
+    double p99_ms = 0.0;
     // Total guest frames since startup.
     uint64_t frame_count = 0;
   };

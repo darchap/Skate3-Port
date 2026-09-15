@@ -15,6 +15,11 @@
 #include <algorithm>
 
 #include <imgui.h>
+#include <rex/cvar.h>
+
+REXCVAR_DEFINE_BOOL(show_fps_percentiles, false, "UI",
+                    "Add 1% low FPS and p95/p99 frame times to the FPS counter")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 namespace rex::ui {
 
@@ -38,6 +43,10 @@ void FpsOverlayDialog::OnDraw(ImGuiIO& io) {
       ImGui::Text("%.0f FPS", stats.fps);
       ImGui::PushFont(nullptr, 14.0f);
       ImGui::Text("%.2f ms", stats.frame_time_ms);
+      if (REXCVAR_GET(show_fps_percentiles) && stats.p99_ms > 0.0) {
+        ImGui::Text("1%% low %.0f FPS", stats.low_1pct_fps);
+        ImGui::Text("p95 %.2f  p99 %.2f ms", stats.p95_ms, stats.p99_ms);
+      }
       // Time the GPU emulation thread spent blocked on host GPU fences last
       // frame: near the frame time = GPU-bound, near zero = thread-bound.
       ImGui::Text("wait %.2f ms", stats.wait_ms);

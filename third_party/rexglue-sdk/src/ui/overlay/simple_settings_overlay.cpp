@@ -77,6 +77,7 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
 constexpr std::array<std::string_view, 31> kOptionalSimpleSettingsCvars = {
+    "show_fps_percentiles",
     "skate3_native_render_scene_handheld_potato",
     "skate3_android_scene_width_cap",
     "skate3_android_scene_height_cap",
@@ -91,7 +92,6 @@ constexpr std::array<std::string_view, 31> kOptionalSimpleSettingsCvars = {
     "skate3_native_render_scene_bloom",
     "skate3_native_render_scene_shafts",
     "skate3_native_render_scene_haze",
-    "skate3_native_render_mode_indicator",
     "skate3_draw_distance_scale",
     "skate3_lod_distance_scale",
     "skate3_draw_distance_stream_probe",
@@ -1142,9 +1142,9 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
                   rex::cvar::Query<bool>("skate3_native_render_scene_haze"));
   draw_distance_index_ = DrawDistanceIndexFromCvar();
   stream_probe_index_ = StreamProbeIndexFromCvar();
-  mode_indicator_ = HasCvar("skate3_native_render_mode_indicator") &&
-                    rex::cvar::Query<bool>("skate3_native_render_mode_indicator");
   fps_counter_ = HasCvar("show_fps_counter") && rex::cvar::Query<bool>("show_fps_counter");
+  fps_percentiles_ =
+      HasCvar("show_fps_percentiles") && rex::cvar::Query<bool>("show_fps_percentiles");
   audio_mute_ = HasCvar("audio_mute") && rex::cvar::Query<bool>("audio_mute");
   rumble_ = HasCvar("hid_rumble_enabled") && rex::cvar::Query<bool>("hid_rumble_enabled");
   penguin_mod_ = HasCvar("skate3_penguin_mod") &&
@@ -1974,7 +1974,7 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         };
         rows.push_back(std::move(row));
       }
-      if (HasCvar("show_fps_counter") || HasCvar("skate3_native_render_mode_indicator")) {
+      if (HasCvar("show_fps_counter")) {
         header("Interface");
       }
       if (HasCvar("show_fps_counter")) {
@@ -1995,26 +1995,43 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         };
         rows.push_back(std::move(row));
       }
-      if (HasCvar("skate3_native_render_mode_indicator")) {
+      if (HasCvar("show_fps_percentiles")) {
         RowSpec row;
         row.kind = RowSpec::kEnum;
-        row.label = "Renderer Indicator";
+        row.label = "FPS Percentiles";
         row.desc =
-            "Small corner readout of which renderer produced the last frame "
-            "(NATIVE or EMULATED). Always shown while the Renderer setting "
-            "is Emulated. Applies immediately.";
+            "Add 1% low FPS and the p95/p99 frame times over the last four "
+            "seconds to the FPS counter. Applies immediately.";
         row.options = {"Off", "On"};
-        row.flag = &mode_indicator_;
+        row.flag = &fps_percentiles_;
         row.on_enum_change = [this](int value) {
-          SetBoolCvar("skate3_native_render_mode_indicator", value != 0);
+          SetBoolCvar("show_fps_percentiles", value != 0);
           SaveSimpleSettingsConfig(config_path_);
         };
         row.reset = [this] {
-          mode_indicator_ = CvarDefaultBool("skate3_native_render_mode_indicator", false);
-          SetBoolCvar("skate3_native_render_mode_indicator", mode_indicator_);
+          fps_percentiles_ = false;
+          SetBoolCvar("show_fps_percentiles", false);
           SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_bench_run") && HasCvar("skate3_benchmark_frames")) {
+        header("Benchmark");
+        RowSpec run;
+        run.kind = RowSpec::kAction;
+        run.label = "Run Benchmark";
+        run.desc =
+            "Hands-free 70-second scripted camera move from where the camera "
+            "is now (sway, dolly, rise) with frame times recorded. Stand at "
+            "the same spot facing the same way to compare runs. The "
+            "avg/p50/p95/p99 summary lands in the session log; BENCH shows "
+            "top-right while it runs; leave the phone alone until the result "
+            "appears.";
+        run.action = [this] {
+          rex::cvar::SetFlagByName("skate3_bench_run", "true");
+          Hide();
+        };
+        rows.push_back(std::move(run));
       }
       break;
     }
