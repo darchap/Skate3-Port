@@ -1229,7 +1229,11 @@ bool SimpleSettingsDialog::HasSettingsChanges() const {
          vsync_ != rex::cvar::Query<bool>("vsync") ||
          tearing_ != TearingFromCvar() ||
          mnk_mode_ != rex::cvar::Query<bool>("mnk_mode") ||
-         mnk_capture_mouse_ != rex::cvar::Query<bool>("mnk_capture_mouse");
+         mnk_capture_mouse_ != rex::cvar::Query<bool>("mnk_capture_mouse") ||
+         (HasCvar("skate3_native_render_scene_ambient_npcs") &&
+          ambient_npcs_ != rex::cvar::Query<bool>("skate3_native_render_scene_ambient_npcs")) ||
+         (HasCvar("skate3_native_render_scene_movable_props") &&
+          movable_props_ != rex::cvar::Query<bool>("skate3_native_render_scene_movable_props"));
 }
 
 void SimpleSettingsDialog::Toggle() {
@@ -1348,6 +1352,12 @@ void SimpleSettingsDialog::SaveVideo() {
   rex::cvar::SetFlagByName("draw_resolution_scale_y", scale);
   ApplyFrameCap();
   SetBoolCvar("fullscreen", fullscreen_);
+  if (HasCvar("skate3_native_render_scene_ambient_npcs")) {
+    SetBoolCvar("skate3_native_render_scene_ambient_npcs", ambient_npcs_);
+  }
+  if (HasCvar("skate3_native_render_scene_movable_props")) {
+    SetBoolCvar("skate3_native_render_scene_movable_props", movable_props_);
+  }
   if (HasCvar("skate3_display_aspect_mode")) {
     rex::cvar::SetFlagByName("skate3_display_aspect_mode",
                              std::to_string(aspect_ratio_index_));
@@ -2003,24 +2013,15 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         row.kind = RowSpec::kEnum;
         row.label = "Pedestrians & Traffic";
         row.desc =
-            "Ambient pedestrians, traffic, their hair and what they carry. Off "
-            "removes them from the picture and skips their per-frame capture "
-            "cost; it also removes movable street props (same object family), "
-            "so the Movable Props row has no effect while this is Off. The "
-            "player and other skaters are never affected; the simulation and "
-            "its sounds keep running. Applies immediately.";
+            "Ambient pedestrians and traffic. Off stops the game from spawning "
+            "them at all, the same as Free Skate level 0: no collision, no "
+            "voices, no engine noise. The player and other skaters are never "
+            "affected.";
+        row.value_note = "Applied with Apply & Restart (X)";
         row.options = {"Off", "On"};
         row.flag = &ambient_npcs_;
-        row.on_enum_change = [this](int value) {
-          ambient_npcs_ = value != 0;
-          SetBoolCvar("skate3_native_render_scene_ambient_npcs", ambient_npcs_);
-          SaveSimpleSettingsConfig(config_path_);
-        };
-        row.reset = [this] {
-          ambient_npcs_ = true;
-          SetBoolCvar("skate3_native_render_scene_ambient_npcs", true);
-          SaveSimpleSettingsConfig(config_path_);
-        };
+        row.on_enum_change = [this](int value) { ambient_npcs_ = value != 0; };
+        row.reset = [this] { ambient_npcs_ = true; };
         rows.push_back(std::move(row));
       }
       if (HasCvar("skate3_native_render_scene_movable_props")) {
@@ -2028,21 +2029,16 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         row.kind = RowSpec::kEnum;
         row.label = "Movable Props";
         row.desc =
-            "Benches, cones, bins and other pushable street clutter. Off "
-            "removes them at scene capture; gameplay objects stay. Applies "
-            "immediately.";
+            "Benches, cones, bins and other pushable street clutter. Off stops "
+            "the game from placing them, so nothing invisible is left to bump "
+            "into; gameplay objects stay.";
+        row.value_note = "Applied with Apply & Restart (X)";
         row.options = {"Off", "On"};
         row.flag = &movable_props_;
         row.on_enum_change = [this](int value) {
           movable_props_ = value != 0;
-          SetBoolCvar("skate3_native_render_scene_movable_props", movable_props_);
-          SaveSimpleSettingsConfig(config_path_);
         };
-        row.reset = [this] {
-          movable_props_ = true;
-          SetBoolCvar("skate3_native_render_scene_movable_props", true);
-          SaveSimpleSettingsConfig(config_path_);
-        };
+        row.reset = [this] { movable_props_ = true; };
         rows.push_back(std::move(row));
       }
       if (HasCvar("skate3_native_render_scene_clutter_detail")) {

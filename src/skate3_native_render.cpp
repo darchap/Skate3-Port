@@ -599,6 +599,31 @@ extern "C" REX_FUNC(sub_827C1188) {
   }
 }
 
+// LivingWorld census spawners (this, spawn request) -> entity or 0. Taking
+// the game's own "spawned nothing" exit is what Free Skate level 0 does:
+// no entity means no collision, no voice, no hair. Existing ones walk off.
+extern "C" REX_FUNC(sub_82E22F30) {  // LWPedestrianCensusMan
+  if (!skate3::native_scene::AmbientNpcsAtBoot()) {
+    ctx.r3.u64 = 0;
+    return;
+  }
+  __imp__sub_82E22F30(ctx, base);
+}
+extern "C" REX_FUNC(sub_82C36300) {  // vehicle census
+  if (!skate3::native_scene::AmbientNpcsAtBoot()) {
+    ctx.r3.u64 = 0;
+    return;
+  }
+  __imp__sub_82C36300(ctx, base);
+}
+extern "C" REX_FUNC(sub_82C4D440) {  // movable street props
+  if (!skate3::native_scene::MovablePropsAtBoot()) {
+    ctx.r3.u64 = 0;
+    return;
+  }
+  __imp__sub_82C4D440(ctx, base);
+}
+
 // Sk8::SkaterPresEntity::StartJobs, bracketed as a pack owner:
 // UpdateBoneTransforms calls inside stamp their snapshots with this entity.
 extern "C" REX_FUNC(sub_827825B0) {

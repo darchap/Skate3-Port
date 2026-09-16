@@ -82,8 +82,6 @@ REXCVAR_DECLARE(bool, skate3_native_render_scene_hdr);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_hdr_packed);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_hair_single_pass);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_vegetation);
-REXCVAR_DECLARE(bool, skate3_native_render_scene_ambient_npcs);
-REXCVAR_DECLARE(bool, skate3_native_render_scene_movable_props);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_clutter_detail);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lightmaps);
 REXCVAR_DECLARE(bool, skate3_native_render_scene_lm_dump);
@@ -4963,13 +4961,12 @@ void ProcessPrewarmEntry(uint8_t* base, const PrewarmEntry& e) {
                             item.env_family == 10 || item.transparent ||
                             item.env_family == 13;
     const bool ambient_npc = item.char_family == 3 || item.char_family == 5 ||
-                             item.char_family == 6 || item.char_family == 7 ||
-                             item.dynobj != 0;
+                             item.char_family == 6 || item.char_family == 7;
     const bool drop =
         (vegetation && !REXCVAR_GET(skate3_native_render_scene_vegetation)) ||
-        (ambient_npc && !REXCVAR_GET(skate3_native_render_scene_ambient_npcs)) ||
+        (ambient_npc && !AmbientNpcsAtBoot()) ||
         (item.dynobj != 0 &&
-         !REXCVAR_GET(skate3_native_render_scene_movable_props));
+         !MovablePropsAtBoot());
     if (drop) {
       // Count this registration as completed without allocating any GPU
       // buffers or staging textures. The live capture/build path applies

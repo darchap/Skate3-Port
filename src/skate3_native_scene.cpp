@@ -1263,14 +1263,14 @@ REXCVAR_DEFINE_BOOL(
     "every dynamic-object prop (carried items, benches, dumpsters, cones) at "
     "scene capture; the player and other skaters are unaffected and the "
     "simulation keeps running.")
-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(
     skate3_native_render_scene_movable_props, true, "Skate 3",
     "Draw movable street props (benches, cones, bins and other pushable "
     "clutter). Off removes them at scene capture; gameplay geometry is "
     "unaffected.")
-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(
     skate3_native_render_scene_clutter_detail, true, "Skate 3",
@@ -2819,14 +2819,10 @@ bool ContentSettingsDrop(const DrawItem& item) {
       !REXCVAR_GET(skate3_native_render_scene_vegetation)) {
     return true;
   }
-  // Pedestrians off also drops dynobj items: the caps, bottles and other
-  // objects they carry are dynobj and would float in place otherwise.
-  if ((IsAmbientNpc(item) || item.dynobj != 0) &&
-      !REXCVAR_GET(skate3_native_render_scene_ambient_npcs)) {
+  if (IsAmbientNpc(item) && !AmbientNpcsAtBoot()) {
     return true;
   }
-  if (item.dynobj != 0 &&
-      !REXCVAR_GET(skate3_native_render_scene_movable_props)) {
+  if (item.dynobj != 0 && !MovablePropsAtBoot()) {
     return true;
   }
   return false;
@@ -10719,8 +10715,7 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
   const bool water_skip = !REXCVAR_GET(skate3_native_render_scene_water_effects);
   g_tree_frame_done = !REXCVAR_GET(skate3_native_render_scene_vegetation);
   g_proxy_frame_done = false;
-  g_dynobj_frame_done = !REXCVAR_GET(skate3_native_render_scene_movable_props) ||
-                        !REXCVAR_GET(skate3_native_render_scene_ambient_npcs);
+  g_dynobj_frame_done = !MovablePropsAtBoot();
   g_water_frame_done = water_skip;
   g_ocean_frame_done = water_skip;
   g_oceanrefl_frame_done = water_skip;
@@ -10982,4 +10977,14 @@ extern "C" REX_FUNC(sub_82802A00) {
     ns::g_freecam_guest_rewrites.fetch_add(1, std::memory_order_relaxed);
   }
   __imp__sub_82802A00(ctx, base);
+}
+
+bool skate3::native_scene::AmbientNpcsAtBoot() {
+  static const bool value = REXCVAR_GET(skate3_native_render_scene_ambient_npcs);
+  return value;
+}
+
+bool skate3::native_scene::MovablePropsAtBoot() {
+  static const bool value = REXCVAR_GET(skate3_native_render_scene_movable_props);
+  return value;
 }
