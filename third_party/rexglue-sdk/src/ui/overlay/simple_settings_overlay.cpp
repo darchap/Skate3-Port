@@ -1145,12 +1145,15 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
                    rex::cvar::Query<bool>("skate3_native_render_scene_movable_props");
   clutter_detail_ = !HasCvar("skate3_native_render_scene_clutter_detail") ||
                     rex::cvar::Query<bool>("skate3_native_render_scene_clutter_detail");
+  // AND, not OR: the row writes all three together, so it must read as all
+  // three. Loading as OR made a mixed state show "Full", and a row already
+  // showing Full cannot be re-selected to repair it.
   world_texture_layers_ =
-      (HasCvar("skate3_native_render_scene_lightmaps") &&
-       rex::cvar::Query<bool>("skate3_native_render_scene_lightmaps")) ||
-      (HasCvar("skate3_native_render_scene_macro") &&
-       rex::cvar::Query<bool>("skate3_native_render_scene_macro")) ||
-      (HasCvar("skate3_native_render_scene_decals") &&
+      (!HasCvar("skate3_native_render_scene_lightmaps") ||
+       rex::cvar::Query<bool>("skate3_native_render_scene_lightmaps")) &&
+      (!HasCvar("skate3_native_render_scene_macro") ||
+       rex::cvar::Query<bool>("skate3_native_render_scene_macro")) &&
+      (!HasCvar("skate3_native_render_scene_decals") ||
        rex::cvar::Query<bool>("skate3_native_render_scene_decals"));
 #endif
   frame_cap_index_ = FrameCapIndexFromCvar();
