@@ -14,6 +14,7 @@ import org.libsdl.app.SDLSurface;
 
 public class Skate3Activity extends SDLActivity {
     private static final String INPUT_TAG = "Skate3Input";
+    private static final String LIFECYCLE_TAG = "Skate3Lifecycle";
     private static volatile boolean sessionActive;
     private TouchControllerView touchController;
 
@@ -101,6 +102,14 @@ public class Skate3Activity extends SDLActivity {
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            SystemBars.hideSystemBars(this);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         // Surface survived the pause: no surfaceChanged will follow.
@@ -126,7 +135,18 @@ public class Skate3Activity extends SDLActivity {
         sessionActive = false;
         GameKeepAliveService.stop(this);
         if (touchController != null) touchController.disconnect();
+        // Read before super: the flag is what separates a real close from a
+        // low-memory destroy, and backgrounding never reaches onDestroy at all.
+        boolean finishing = isFinishing();
+        Log.i(LIFECYCLE_TAG, "onDestroy finishing=" + finishing);
         super.onDestroy();
+        if (finishing) {
+            // Guest threads (Job Manager, dlc_enumerator, presence_thread) are
+            // recompiled 360 code with no shutdown path, so the process would keep
+            // running with audio until Android reclaimed it.
+            Log.i(LIFECYCLE_TAG, "exiting process to stop guest threads");
+            System.exit(0);
+        }
     }
 
     private static int getAllSources(int deviceId, int eventSource) {
