@@ -34,7 +34,8 @@ Developed and tested on a **Poco F3** (Snapdragon 870 / Adreno 650).
 
 ## Getting it running
 
-Install the APK, open it, and the launcher walks you through three steps:
+Download the APK from [Releases](https://github.com/darchap/Skate3-Port/releases), install
+it, open it, and the launcher walks you through three steps:
 
 1. **Select My Skate 3 ISO** — pick your ISO with the file picker. The app verifies
    `default.xex` and `data/webkit/EAWebkit.xex` by SHA-256, then extracts them.
