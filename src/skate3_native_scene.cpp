@@ -1259,10 +1259,9 @@ REXCVAR_DEFINE_BOOL(
 
 REXCVAR_DEFINE_BOOL(
     skate3_native_render_scene_ambient_npcs, true, "Skate 3",
-    "Draw ambient pedestrians and traffic. Off removes them, their hair and "
-    "every dynamic-object prop (carried items, benches, dumpsters, cones) at "
-    "scene capture; the player and other skaters are unaffected and the "
-    "simulation keeps running.")
+    "Draw ambient pedestrians and traffic. Off removes them and their hair at "
+    "scene capture; carried items, benches and cones follow Movable Props. The "
+    "player and other skaters are unaffected and the simulation keeps running.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(
