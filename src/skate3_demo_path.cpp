@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -19,6 +21,7 @@
 #include <rex/kernel/xam/input_injection.h>
 #include <rex/logging.h>
 #include <rex/ppc/context.h>
+#include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
 
 #if defined(_WIN32)
@@ -92,8 +95,37 @@ bool ProbeEnabled() {
          rex::cvar::Query<bool>("skate3_demo_path_probe");
 }
 
+// Written once, the first time a session actually reaches gameplay. That is the
+// real precondition for auto-boot: the save file cannot be used, because Skate 3
+// writes a full SKATER.P at boot before the player has configured anything.
+std::filesystem::path GameplayMarkerPath() {
+  const rex::Runtime* runtime = rex::Runtime::instance();
+  if (runtime == nullptr || runtime->user_data_root().empty()) {
+    return {};
+  }
+  return runtime->user_data_root() / ".reached-gameplay";
+}
+
+bool HasReachedGameplay() {
+  static std::atomic<int> cached{-1};
+  const int known = cached.load(std::memory_order_relaxed);
+  if (known >= 0) {
+    return known != 0;
+  }
+  const std::filesystem::path marker = GameplayMarkerPath();
+  if (marker.empty()) {
+    // Runtime is not up yet; answering now would poison the cache for the session.
+    return false;
+  }
+  std::error_code ec;
+  const bool found = std::filesystem::is_regular_file(marker, ec);
+  cached.store(found ? 1 : 0, std::memory_order_relaxed);
+  REXLOG_INFO("Skate 3 demo path: gameplay marker {}", found ? "present" : "absent");
+  return found;
+}
+
 bool AutomationEnabled() {
-  return rex::cvar::Query<bool>("skate3_demo_path");
+  return rex::cvar::Query<bool>("skate3_demo_path") && HasReachedGameplay();
 }
 
 const char* KnownFrontEndStateName(uint32_t state_id) {
@@ -305,11 +337,15 @@ bool UserRequestedMovieSkip() {
 
 std::atomic<bool> g_input_worker_quit{false};
 std::thread g_input_worker;
+std::thread g_gameplay_marker_worker;
 
 void JoinGameplayInputWorker() {
   g_input_worker_quit.store(true, std::memory_order_relaxed);
   if (g_input_worker.joinable()) {
     g_input_worker.join();
+  }
+  if (g_gameplay_marker_worker.joinable()) {
+    g_gameplay_marker_worker.join();
   }
 }
 
@@ -324,6 +360,35 @@ bool InterruptibleSleepMs(int64_t total_ms) {
     total_ms -= slice;
   }
   return !g_input_worker_quit.load(std::memory_order_relaxed);
+}
+
+// Deliberately NOT gated on AutomationEnabled(): on a first boot automation is
+// off, and if the marker were only written then, auto-boot could never turn
+// itself back on. Exits as soon as gameplay is seen, or on shutdown.
+void StartGameplayMarkerWorker() {
+  if (g_gameplay_marker_worker.joinable() || HasReachedGameplay()) {
+    return;
+  }
+  g_gameplay_marker_worker = std::thread([] {
+    while (rex::kernel::guest_presence::GameplayContextValue() != 1) {
+      if (!InterruptibleSleepMs(1000)) {
+        return;
+      }
+    }
+    const std::filesystem::path marker = GameplayMarkerPath();
+    if (marker.empty()) {
+      return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(marker.parent_path(), ec);
+    std::ofstream out(marker);
+    if (!out) {
+      REXLOG_WARN("Skate 3 demo path: could not write gameplay marker {}", marker.string());
+      return;
+    }
+    out << "reached gameplay" << std::endl;
+    REXLOG_INFO("Skate 3 demo path: gameplay reached; auto-boot enabled from next launch");
+  });
 }
 
 void StartGameplayInputWorkerIfNeeded() {
@@ -405,16 +470,29 @@ void StartGameplayInputWorkerIfNeeded() {
     }
     REXLOG_INFO("Skate 3 demo path: gameplay input sequence complete");
   });
-  std::atexit(JoinGameplayInputWorker);
 }
 
 }  // namespace
 
 void InstallHooks(rex::runtime::FunctionDispatcher* dispatcher) {
-  if (!dispatcher || !ProbeEnabled()) {
+  if (!dispatcher) {
     return;
   }
 
+  // Both of these run even with the probe off. Off is exactly when the SDK's
+  // dialog auto-tap hurts, and the marker must keep being written or auto-boot
+  // could never re-enable itself. The join must be registered wherever a worker
+  // can start: a joinable std::thread destroyed at exit calls std::terminate.
+  if (!AutomationEnabled()) {
+    rex::kernel::xam::CompleteSyntheticBootAutomation();
+    REXLOG_INFO("Skate 3 demo path: automation off; input handed to the player");
+  }
+  StartGameplayMarkerWorker();
+  std::atexit(JoinGameplayInputWorker);
+
+  if (!ProbeEnabled()) {
+    return;
+  }
   dispatcher->SetFunction(0x82D0AFA0, &Skate3DemoPath_SetFrontEndStateHook);
   dispatcher->SetFunction(0x826FDD70, &Skate3DemoPath_LanguageSelectStateHook);
   dispatcher->SetFunction(0x826FE1D8, &Skate3DemoPath_ShowPressStartModeHook);

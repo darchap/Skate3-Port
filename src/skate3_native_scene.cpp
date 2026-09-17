@@ -1250,12 +1250,48 @@ REXCVAR_DEFINE_BOOL(skate3_native_render_scene_perf_log, false, "Skate 3",
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 REXCVAR_DEFINE_BOOL(
-    skate3_native_render_scene_handheld_potato, false, "Skate 3",
-    "Aggressive handheld CPU profile: removes vegetation, alpha-tested "
-    "world clutter, ambient pedestrians/traffic and movable props; strips "
-    "secondary world textures; and coalesces nearby draw islands. Intended "
-    "for low-power Android handhelds where frame rate matters more than "
-    "scene fidelity.")
+    skate3_native_render_scene_vegetation, true, "Skate 3",
+    "Draw vegetation and alpha-tested world cards: tree cards, grass, shrubs, "
+    "leaf and fence cards. Off drops them at scene capture, which removes a "
+    "large share of draw calls and the shimmer they cause at low scene "
+    "resolutions.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_ambient_npcs, true, "Skate 3",
+    "Draw ambient pedestrians and traffic. Off removes them and their hair at "
+    "scene capture; carried items, benches and cones follow Movable Props. The "
+    "player and other skaters are unaffected and the simulation keeps running.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_movable_props, true, "Skate 3",
+    "Draw movable street props (benches, cones, bins and other pushable "
+    "clutter). Off removes them at scene capture; gameplay geometry is "
+    "unaffected.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_BOOL(
+    skate3_native_render_scene_clutter_detail, true, "Skate 3",
+    "Keep tiny static trim and clutter. Off discards small static props "
+    "whose whole footprint is a few pixels, at capture and again by screen "
+    "size at draw time. Rails, ledges and large surfaces are always kept.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+REXCVAR_DEFINE_BOOL(skate3_native_render_scene_merge_draws, false, "Skate 3",
+                    "Coalesce adjacent draw islands of one material into a single "
+                    "draw, at the cost of up to 32 extra triangles per merge. "
+                    "Applies to geometry built after the change.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_BOOL(skate3_native_render_scene_hair_single_pass, false, "Skate 3",
+                    "Draw hair in one coverage pass instead of the game's two "
+                    "cull passes; halves hair draw cost, far strands may show "
+                    "through near ones.")
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_BOOL(skate3_native_render_scene_water_effects, true, "Skate 3",
+                    "Capture water, ocean, ocean reflection and scrolling "
+                    "materials for the native water paths. Off skips the probes "
+                    "and draws them through the plain material path.")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
 REXCVAR_DEFINE_INT32(skate3_native_render_scene_perf_interval, 600, "Skate 3",
@@ -2755,29 +2791,37 @@ bool BuildItemFromMeshCached(uint8_t* base, uint32_t mesh, DrawItem& item) {
   return true;
 }
 
-bool HandheldPotatoEnabled() {
-  return REXCVAR_GET(skate3_native_render_scene_handheld_potato);
-}
-
 // Content that costs far more CPU than it contributes on a 4-inch screen.
 // This gate runs before palette capture for dynamic submissions and before
 // publication for statics, so dropped content avoids the expensive scene
 // post-processing and render-side texture/draw work as well.
-bool HandheldPotatoDrops(const DrawItem& item) {
-  if (!HandheldPotatoEnabled()) {
-    return false;
-  }
-  // Tree cards and environmentsimple.alphatest (grass, shrubs, leaf/fence
-  // cards) are extremely draw-heavy and shimmer badly at handheld scale.
-  if (item.env_family == 7 || item.env_family == 9 ||
-      item.env_family == 10 || item.transparent || item.env_family == 13) {
+// Tree cards and environmentsimple.alphatest (grass, shrubs, leaf/fence
+// cards): extremely draw-heavy and shimmer badly at low scene resolutions.
+bool IsVegetationCard(const DrawItem& item) {
+  return item.env_family == 7 || item.env_family == 9 ||
+         item.env_family == 10 || item.transparent || item.env_family == 13;
+}
+
+// LivingWorld pedestrians/traffic and their hair (family 5 = NPC default_hair;
+// the player's hair is family 4). The player families (1/2), skateboard and
+// gameplay geometry are never here.
+bool IsAmbientNpc(const DrawItem& item) {
+  return item.char_family == 3 || item.char_family == 5 ||
+         item.char_family == 6 || item.char_family == 7;
+}
+
+// Content cuts, each governed by its own user setting. Runs before palette
+// capture for dynamic submissions and before publication for statics, so
+// dropped content also skips scene post-processing and render-side work.
+bool ContentSettingsDrop(const DrawItem& item) {
+  if (IsVegetationCard(item) &&
+      !REXCVAR_GET(skate3_native_render_scene_vegetation)) {
     return true;
   }
-  // LivingWorld pedestrians/traffic and movable street clutter require
-  // per-frame palette/world capture. Preserve the player families (1/2),
-  // skateboard and gameplay geometry; remove ambient simulation visuals.
-  if (item.char_family == 3 || item.char_family == 6 ||
-      item.char_family == 7 || item.dynobj != 0) {
+  if (IsAmbientNpc(item) && !AmbientNpcsAtBoot()) {
+    return true;
+  }
+  if (item.dynobj != 0 && !MovablePropsAtBoot()) {
     return true;
   }
   return false;
@@ -2788,8 +2832,9 @@ bool HandheldPotatoDrops(const DrawItem& item) {
 // tiny trim/clutter whose full raster footprint is only a few pixels. This is
 // deliberately not used by the dynamic capture path, so the skateboard and
 // player pieces can never be classified as disposable by their bounds.
-bool HandheldPotatoDropsStaticGeometry(const DrawItem& item) {
-  if (!HandheldPotatoEnabled() || item.char_family != 0 || item.water) {
+bool ClutterSettingDrops(const DrawItem& item) {
+  if (REXCVAR_GET(skate3_native_render_scene_clutter_detail) ||
+      item.char_family != 0 || item.water) {
     return false;
   }
   const float sx = std::fabs(item.bbox_max[0] - item.bbox_min[0]);
@@ -2801,26 +2846,6 @@ bool HandheldPotatoDropsStaticGeometry(const DrawItem& item) {
     indices += draw.index_count;
   }
   return longest < 1.25f || (longest < 2.0f && indices < 60);
-}
-
-void ApplyHandheldPotatoMaterial(DrawItem& item) {
-  if (!HandheldPotatoEnabled() || item.char_family != 0 || item.water) {
-    return;
-  }
-  // Retain the authored base color but replace every secondary material
-  // input with the renderer's shared neutral textures. This eliminates the
-  // guest route checks, decode/store traffic and streaming heals for maps
-  // that are barely visible at 360p: baked light, macro grime, detail/
-  // normal, spec/reflection masks and decal artwork.
-  item.lightmap_tex = 0;
-  item.macro_tex = 0;
-  item.detail_tex = 0;
-  item.spec_tex = 0;
-  item.decal_art = 0;
-  item.decal = false;
-  item.decal_tileable = false;
-  std::memset(item.diffuse_fetch, 0, sizeof(item.diffuse_fetch));
-  std::memset(item.decal_fetch, 0, sizeof(item.decal_fetch));
 }
 
 bool BuildItemGeometry(uint8_t* base, uint32_t ctx, DrawItem& item) {
@@ -2850,7 +2875,6 @@ bool BuildItemGeometry(uint8_t* base, uint32_t ctx, DrawItem& item) {
   if (prof) {
     g_pw_bi_fetch.Add(PerfNsSince(fetch_t0));
   }
-  ApplyHandheldPotatoMaterial(item);
   // Identity for per-instance consumers (the occlusion cull's guest-side
   // dispatch filter keys on it; the dynamic capture path overwrites it with
   // its own value).
@@ -2869,12 +2893,10 @@ bool BuildItemGeometry(uint8_t* base, uint32_t ctx, DrawItem& item) {
     DrawEntry entry{REX_LOAD_U32(d), REX_LOAD_U32(d + 4), REX_LOAD_U32(d + 8),
                     REX_LOAD_U32(d + 12)};
     if (entry.index_count == 0 || entry.index_count > item.ib_count) continue;
-    // Draw lists are visibility islands inside one material mesh. On the
-    // handheld profile, coalesce adjacent islands and tiny culled gaps into
-    // one command. Drawing at most 32 extra triangles is substantially
-    // cheaper than another Vulkan state/descriptor/draw submission on the
-    // RG406V, and all indices still belong to this material's index buffer.
-    if (HandheldPotatoEnabled() && !item.draws.empty()) {
+    // Draw lists are visibility islands inside one material mesh; merge
+    // adjacent islands and gaps of at most 32 triangles into one draw. All
+    // indices still belong to this material's index buffer.
+    if (REXCVAR_GET(skate3_native_render_scene_merge_draws) && !item.draws.empty()) {
       DrawEntry& prev = item.draws.back();
       const uint64_t prev_end = uint64_t(prev.start_index) + prev.index_count;
       const uint64_t entry_end = uint64_t(entry.start_index) + entry.index_count;
@@ -4400,7 +4422,7 @@ uint32_t CaptureDynamicState(uint8_t* base, uint32_t ctx, bool world_path,
   if (!BuildItemGeometry(base, ctx, item)) {
     return 0;
   }
-  if (HandheldPotatoDrops(item)) {
+  if (ContentSettingsDrop(item)) {
     return 0;
   }
   item.ctx = ctx;  // identity key for the palette serve / entity store
@@ -8984,7 +9006,7 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
         continue;
       }
       const DrawItem& cand = dynitems[r.c - 1];
-      if (HandheldPotatoDrops(cand)) {
+      if (ContentSettingsDrop(cand)) {
         continue;
       }
       if (cand.pending) {
@@ -9087,8 +9109,8 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
 #endif
     DrawItem item;
     if (BuildItemGeometry(base, r.a, item)) {
-      if (HandheldPotatoDrops(item) ||
-          HandheldPotatoDropsStaticGeometry(item)) {
+      if (ContentSettingsDrop(item) ||
+          ClutterSettingDrops(item)) {
         continue;
       }
       if (item.skinned) {
@@ -10686,18 +10708,17 @@ void BuildFrameScene(uint8_t* base, const SubmitRecord* records, size_t count) {
   g_fog_frame_done = false;
   g_shadow_frame_done = false;
   g_sky_frame_done = false;
-  // The handheld potato profile drops these families or deliberately uses
-  // their cheaper legacy material paths. Re-arming their name-based capture
-  // probes made every guest draw re-read and strstr shader debug paths when a
-  // family wasn't present in the current view (especially ocean/water).
-  const bool potato_capture_skip = HandheldPotatoEnabled();
-  g_tree_frame_done = potato_capture_skip;
+  // A family that is switched off keeps its capture probe disarmed: re-arming
+  // it made every guest draw re-read and strstr shader debug paths whenever
+  // the family was absent from the view (especially ocean/water).
+  const bool water_skip = !REXCVAR_GET(skate3_native_render_scene_water_effects);
+  g_tree_frame_done = !REXCVAR_GET(skate3_native_render_scene_vegetation);
   g_proxy_frame_done = false;
-  g_dynobj_frame_done = potato_capture_skip;
-  g_water_frame_done = potato_capture_skip;
-  g_ocean_frame_done = potato_capture_skip;
-  g_oceanrefl_frame_done = potato_capture_skip;
-  g_scroll_frame_done = potato_capture_skip;
+  g_dynobj_frame_done = !MovablePropsAtBoot();
+  g_water_frame_done = water_skip;
+  g_ocean_frame_done = water_skip;
+  g_oceanrefl_frame_done = water_skip;
+  g_scroll_frame_done = water_skip;
 
 
   // Draw-time STRETCH VETO: the last line of defense, judging what the GPU
@@ -10955,4 +10976,14 @@ extern "C" REX_FUNC(sub_82802A00) {
     ns::g_freecam_guest_rewrites.fetch_add(1, std::memory_order_relaxed);
   }
   __imp__sub_82802A00(ctx, base);
+}
+
+bool skate3::native_scene::AmbientNpcsAtBoot() {
+  static const bool value = REXCVAR_GET(skate3_native_render_scene_ambient_npcs);
+  return value;
+}
+
+bool skate3::native_scene::MovablePropsAtBoot() {
+  static const bool value = REXCVAR_GET(skate3_native_render_scene_movable_props);
+  return value;
 }

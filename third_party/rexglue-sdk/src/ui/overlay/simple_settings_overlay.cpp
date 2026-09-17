@@ -50,6 +50,12 @@ constexpr std::array<int32_t, 8> kAndroidSceneResHeights = {
     288, 360, 432, 480, 540, 612, 648, 720};
 constexpr std::array<int32_t, 8> kAndroidSceneResWidths = {
     512, 640, 768, 854, 960, 1088, 1152, 1280};
+constexpr std::array<const char*, 4> kNpcUpdateRateLabels = {
+    "Every Frame (Original)", "Every 2nd Frame", "Every 3rd Frame", "Every 4th Frame"};
+constexpr std::array<int32_t, 4> kNpcUpdateRates = {1, 2, 3, 4};
+constexpr std::array<const char*, 4> kWorldRefreshLabels = {
+    "Every Frame (Original)", "Every 2nd Frame", "Every 4th Frame", "Every 8th Frame"};
+constexpr std::array<int32_t, 4> kWorldRefreshRates = {1, 2, 4, 8};
 #else
 constexpr std::array<int32_t, 3> kResolutionScales = {1, 2, 3};
 constexpr std::array<const char*, 3> kResolutionLabels = {"720p (1x)", "1440p (2x)",
@@ -76,9 +82,20 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 31> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 42> kOptionalSimpleSettingsCvars = {
     "show_fps_percentiles",
-    "skate3_native_render_scene_handheld_potato",
+    "skate3_native_render_lw_update_refresh",
+    "skate3_native_render_guest_static_refresh",
+    "skate3_native_render_scene_merge_draws",
+    "skate3_native_render_scene_hair_single_pass",
+    "skate3_native_render_scene_water_effects",
+    "skate3_native_render_scene_vegetation",
+    "skate3_native_render_scene_ambient_npcs",
+    "skate3_native_render_scene_movable_props",
+    "skate3_native_render_scene_clutter_detail",
+    "skate3_native_render_scene_lightmaps",
+    "skate3_native_render_scene_macro",
+    "skate3_native_render_scene_decals",
     "skate3_android_scene_width_cap",
     "skate3_android_scene_height_cap",
     "skate3_native_render_scene",
@@ -352,6 +369,17 @@ int ResolutionIndexFromCvar() {
 }
 
 #if REX_PLATFORM_ANDROID
+template <size_t N>
+int NearestRateIndex(const std::array<int32_t, N>& rates, const char* cvar) {
+  if (!HasCvar(cvar)) return 0;
+  const int32_t value = rex::cvar::Query<int32_t>(cvar);
+  int best = 0;
+  for (int i = 1; i < static_cast<int>(N); ++i) {
+    if (std::abs(rates[i] - value) < std::abs(rates[best] - value)) best = i;
+  }
+  return best;
+}
+
 int AndroidQualityProfileIndexFromCvar() {
   return HasCvar("skate3_android_quality_profile")
              ? std::clamp(
@@ -1099,9 +1127,34 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
 #if REX_PLATFORM_ANDROID
   android_quality_profile_index_ = AndroidQualityProfileIndexFromCvar();
   android_scene_res_index_ = AndroidSceneResIndexFromCvar();
-  world_detail_full_ =
-      HasCvar("skate3_native_render_scene_handheld_potato") &&
-      !rex::cvar::Query<bool>("skate3_native_render_scene_handheld_potato");
+  npc_update_rate_index_ =
+      NearestRateIndex(kNpcUpdateRates, "skate3_native_render_lw_update_refresh");
+  world_refresh_index_ =
+      NearestRateIndex(kWorldRefreshRates, "skate3_native_render_guest_static_refresh");
+  merge_draws_ = HasCvar("skate3_native_render_scene_merge_draws") &&
+                 rex::cvar::Query<bool>("skate3_native_render_scene_merge_draws");
+  hair_full_ = !HasCvar("skate3_native_render_scene_hair_single_pass") ||
+               !rex::cvar::Query<bool>("skate3_native_render_scene_hair_single_pass");
+  water_effects_ = !HasCvar("skate3_native_render_scene_water_effects") ||
+                   rex::cvar::Query<bool>("skate3_native_render_scene_water_effects");
+  vegetation_ = !HasCvar("skate3_native_render_scene_vegetation") ||
+                rex::cvar::Query<bool>("skate3_native_render_scene_vegetation");
+  ambient_npcs_ = !HasCvar("skate3_native_render_scene_ambient_npcs") ||
+                  rex::cvar::Query<bool>("skate3_native_render_scene_ambient_npcs");
+  movable_props_ = !HasCvar("skate3_native_render_scene_movable_props") ||
+                   rex::cvar::Query<bool>("skate3_native_render_scene_movable_props");
+  clutter_detail_ = !HasCvar("skate3_native_render_scene_clutter_detail") ||
+                    rex::cvar::Query<bool>("skate3_native_render_scene_clutter_detail");
+  // AND, not OR: the row writes all three together, so it must read as all
+  // three. Loading as OR made a mixed state show "Full", and a row already
+  // showing Full cannot be re-selected to repair it.
+  world_texture_layers_ =
+      (!HasCvar("skate3_native_render_scene_lightmaps") ||
+       rex::cvar::Query<bool>("skate3_native_render_scene_lightmaps")) &&
+      (!HasCvar("skate3_native_render_scene_macro") ||
+       rex::cvar::Query<bool>("skate3_native_render_scene_macro")) &&
+      (!HasCvar("skate3_native_render_scene_decals") ||
+       rex::cvar::Query<bool>("skate3_native_render_scene_decals"));
 #endif
   frame_cap_index_ = FrameCapIndexFromCvar();
   if (HasCvar("skate3_display_aspect_mode")) {
@@ -1179,7 +1232,11 @@ bool SimpleSettingsDialog::HasSettingsChanges() const {
          vsync_ != rex::cvar::Query<bool>("vsync") ||
          tearing_ != TearingFromCvar() ||
          mnk_mode_ != rex::cvar::Query<bool>("mnk_mode") ||
-         mnk_capture_mouse_ != rex::cvar::Query<bool>("mnk_capture_mouse");
+         mnk_capture_mouse_ != rex::cvar::Query<bool>("mnk_capture_mouse") ||
+         (HasCvar("skate3_native_render_scene_ambient_npcs") &&
+          ambient_npcs_ != rex::cvar::Query<bool>("skate3_native_render_scene_ambient_npcs")) ||
+         (HasCvar("skate3_native_render_scene_movable_props") &&
+          movable_props_ != rex::cvar::Query<bool>("skate3_native_render_scene_movable_props"));
 }
 
 void SimpleSettingsDialog::Toggle() {
@@ -1298,6 +1355,12 @@ void SimpleSettingsDialog::SaveVideo() {
   rex::cvar::SetFlagByName("draw_resolution_scale_y", scale);
   ApplyFrameCap();
   SetBoolCvar("fullscreen", fullscreen_);
+  if (HasCvar("skate3_native_render_scene_ambient_npcs")) {
+    SetBoolCvar("skate3_native_render_scene_ambient_npcs", ambient_npcs_);
+  }
+  if (HasCvar("skate3_native_render_scene_movable_props")) {
+    SetBoolCvar("skate3_native_render_scene_movable_props", movable_props_);
+  }
   if (HasCvar("skate3_display_aspect_mode")) {
     rex::cvar::SetFlagByName("skate3_display_aspect_mode",
                              std::to_string(aspect_ratio_index_));
@@ -1856,33 +1919,225 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
         rows.push_back(std::move(row));
       }
 #if REX_PLATFORM_ANDROID
-      // The master lean switch. While Simplified is on the renderer drops
-      // content and skips the shadow pipelines, so the rows above only take
-      // effect on Full.
-      if (HasCvar("skate3_native_render_scene_handheld_potato")) {
+      header("Low-End Devices");
+      if (HasCvar("skate3_native_render_scene_merge_draws")) {
         RowSpec row;
         row.kind = RowSpec::kEnum;
-        row.label = "World Detail";
+        row.label = "Draw Batching";
         row.desc =
-            "Simplified removes vegetation, world clutter, ambient "
-            "pedestrians/traffic and small props, flattens secondary world "
-            "textures and skips building the shadow render pipelines "
-            "entirely, so shadow settings only take effect on Full (the "
-            "handheld profile look). Full restores that content at a real "
-            "GPU/CPU cost; restored grass/foliage can shimmer at low scene "
-            "resolutions. Content already removed comes back as areas "
-            "re-stream while you skate; restart for a clean apply.";
-        row.options = {"Simplified (fast)", "Full"};
-        row.flag = &world_detail_full_;
+            "Merge neighbouring pieces of one material into a single draw, "
+            "drawing a few extra hidden triangles instead of issuing another "
+            "command. Saves CPU in dense areas. Applies to geometry loaded "
+            "after the change.";
+        row.options = {"Off", "On"};
+        row.flag = &merge_draws_;
         row.on_enum_change = [this](int value) {
-          world_detail_full_ = value != 0;
-          SetBoolCvar("skate3_native_render_scene_handheld_potato",
-                      !world_detail_full_);
+          merge_draws_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_merge_draws", merge_draws_);
           SaveSimpleSettingsConfig(config_path_);
         };
         row.reset = [this] {
-          world_detail_full_ = true;
-          SetBoolCvar("skate3_native_render_scene_handheld_potato", false);
+          merge_draws_ = false;
+          SetBoolCvar("skate3_native_render_scene_merge_draws", false);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_hair_single_pass")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Hair Detail";
+        row.desc =
+            "Full draws hair in the game's two passes so far strands never "
+            "show through near ones. Single Pass halves the draw cost of every "
+            "head in view; hair may look noisier up close. Applies immediately.";
+        row.options = {"Single Pass", "Full"};
+        row.flag = &hair_full_;
+        row.on_enum_change = [this](int value) {
+          hair_full_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_hair_single_pass", !hair_full_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          hair_full_ = true;
+          SetBoolCvar("skate3_native_render_scene_hair_single_pass", false);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_water_effects")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Water Effects";
+        row.desc =
+            "Full renders water, ocean, reflections and scrolling surfaces "
+            "through their own effect paths. Simple draws them as plain "
+            "materials, which is cheaper on both CPU and GPU. Applies "
+            "immediately.";
+        row.options = {"Simple", "Full"};
+        row.flag = &water_effects_;
+        row.on_enum_change = [this](int value) {
+          water_effects_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_water_effects", water_effects_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          water_effects_ = true;
+          SetBoolCvar("skate3_native_render_scene_water_effects", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_vegetation")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Vegetation & Foliage";
+        row.desc =
+            "Trees, grass, shrubs and other alpha-tested cards. Off removes "
+            "them at scene capture: far fewer draw calls and no card shimmer "
+            "at low scene resolutions. Content already removed comes back as "
+            "areas re-stream while you skate. Applies immediately.";
+        row.options = {"Off", "On"};
+        row.flag = &vegetation_;
+        row.on_enum_change = [this](int value) {
+          vegetation_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_vegetation", vegetation_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          vegetation_ = true;
+          SetBoolCvar("skate3_native_render_scene_vegetation", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_ambient_npcs")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Pedestrians & Traffic";
+        row.desc =
+            "Ambient pedestrians and traffic. Off stops the game from spawning "
+            "them at all, the same as Free Skate level 0: no collision, no "
+            "voices, no engine noise. The player and other skaters are never "
+            "affected.";
+        row.value_note = "Applied with Apply & Restart (X)";
+        row.options = {"Off", "On"};
+        row.flag = &ambient_npcs_;
+        row.on_enum_change = [this](int value) { ambient_npcs_ = value != 0; };
+        row.reset = [this] { ambient_npcs_ = true; };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_movable_props")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Movable Props";
+        row.desc =
+            "Benches, cones, bins and other pushable street clutter. Off stops "
+            "the game from placing them, so nothing invisible is left to bump "
+            "into; gameplay objects stay.";
+        row.value_note = "Applied with Apply & Restart (X)";
+        row.options = {"Off", "On"};
+        row.flag = &movable_props_;
+        row.on_enum_change = [this](int value) {
+          movable_props_ = value != 0;
+        };
+        row.reset = [this] { movable_props_ = true; };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_clutter_detail")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "Clutter Detail";
+        row.desc =
+            "Tiny static trim and clutter. Reduced drops small props whose "
+            "whole footprint is a few pixels, and more of them with distance. "
+            "Rails, ledges and large surfaces are always kept. Applies "
+            "immediately.";
+        row.options = {"Reduced", "Full"};
+        row.flag = &clutter_detail_;
+        row.on_enum_change = [this](int value) {
+          clutter_detail_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_clutter_detail", clutter_detail_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          clutter_detail_ = true;
+          SetBoolCvar("skate3_native_render_scene_clutter_detail", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_scene_lightmaps")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "World Texture Layers";
+        row.desc =
+            "Secondary world material layers: baked lighting and shadows, "
+            "large-scale grime and weathering, graffiti and decal art. Base "
+            "Color Only keeps just the base textures. Applies immediately.";
+        row.options = {"Base Color Only", "Full"};
+        row.flag = &world_texture_layers_;
+        row.on_enum_change = [this](int value) {
+          world_texture_layers_ = value != 0;
+          SetBoolCvar("skate3_native_render_scene_lightmaps", world_texture_layers_);
+          SetBoolCvar("skate3_native_render_scene_macro", world_texture_layers_);
+          SetBoolCvar("skate3_native_render_scene_decals", world_texture_layers_);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          world_texture_layers_ = true;
+          SetBoolCvar("skate3_native_render_scene_lightmaps", true);
+          SetBoolCvar("skate3_native_render_scene_macro", true);
+          SetBoolCvar("skate3_native_render_scene_decals", true);
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_lw_update_refresh")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "NPC Update Rate";
+        row.desc =
+            "How often pedestrians and traffic advance their simulation. Updates "
+            "are spread across frames, so lower rates flatten crowd frame spikes "
+            "without changing how many NPCs appear. Applies immediately.";
+        for (const char* label : kNpcUpdateRateLabels) row.options.push_back(label);
+        row.index = &npc_update_rate_index_;
+        row.on_enum_change = [this](int value) {
+          npc_update_rate_index_ =
+              std::clamp(value, 0, static_cast<int>(kNpcUpdateRates.size()) - 1);
+          rex::cvar::SetFlagByName("skate3_native_render_lw_update_refresh",
+                                   std::to_string(kNpcUpdateRates[npc_update_rate_index_]));
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          npc_update_rate_index_ = 0;
+          rex::cvar::SetFlagByName("skate3_native_render_lw_update_refresh", "1");
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        rows.push_back(std::move(row));
+      }
+      if (HasCvar("skate3_native_render_guest_static_refresh")) {
+        RowSpec row;
+        row.kind = RowSpec::kEnum;
+        row.label = "World Update Rate";
+        row.desc =
+            "How often draw lists for static world geometry are rebuilt; cached "
+            "lists are replayed in between and moving objects always refresh. "
+            "Lower rates save CPU; newly streamed geometry appears a fraction of "
+            "a second later. Applies immediately.";
+        for (const char* label : kWorldRefreshLabels) row.options.push_back(label);
+        row.index = &world_refresh_index_;
+        row.on_enum_change = [this](int value) {
+          world_refresh_index_ =
+              std::clamp(value, 0, static_cast<int>(kWorldRefreshRates.size()) - 1);
+          rex::cvar::SetFlagByName("skate3_native_render_guest_static_refresh",
+                                   std::to_string(kWorldRefreshRates[world_refresh_index_]));
+          SaveSimpleSettingsConfig(config_path_);
+        };
+        row.reset = [this] {
+          world_refresh_index_ = 0;
+          rex::cvar::SetFlagByName("skate3_native_render_guest_static_refresh", "1");
           SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));

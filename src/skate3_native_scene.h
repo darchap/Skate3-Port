@@ -696,6 +696,11 @@ bool ToggleSceneEnabled();
 // renderer cvars are still enabled.
 bool SceneFailed();
 
+// Pedestrians & Traffic / Movable Props as they were at boot. The spawn hooks
+// and the capture filters must agree, so neither reads the live cvar.
+bool AmbientNpcsAtBoot();
+bool MovablePropsAtBoot();
+
 // Last benchmark summary for the on-screen readout; valid is false when
 // there is none.
 struct BenchmarkResult {

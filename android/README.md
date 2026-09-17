@@ -53,5 +53,5 @@ built with `gradlew.bat assembleDebug`.
 
 Press **RB + Start** to open the runtime settings overlay. Every graphics option under
 **Video** is yours and survives restarts: **3D Scene Resolution** (512x288 to 1280x720,
-applies live), **World Detail** (Full or Simplified), MSAA, shadows, SSAO, bloom and
-the rest. **Android Device Profile** currently has one entry, Custom.
+applies live), the **Low-End Devices** rows, MSAA, shadows, SSAO, bloom and the
+rest. **Android Device Profile** currently has one entry, Custom.
