@@ -111,5 +111,19 @@ SDK can be re-vendored and the patches replayed.
     the debug dialog's independent checkboxes - read as "Full", and a row already showing
     "Full" cannot be re-selected to put the missing layers back.
 
+11. `third_party/rexglue-sdk/{include/rex/system/kernel_state.h,
+    src/system/kernel_state.cpp, src/kernel/xam/xam_user.cpp, xam_content.cpp,
+    xam_content_device.cpp, xam_info.cpp, xam_msg.cpp, include/rex/system/xtypes.h}`
+    (branch fix-overlapped-wakeup): XAM query APIs complete their overlapped on the kernel
+    dispatch thread (`CompleteOverlappedDeferredNow`, no delay) instead of inside the
+    call. Signalling the event before the caller, told `X_ERROR_IO_PENDING`, has armed its
+    wait lost the wake-up: `dlc_enumerator` parked on an already-signalled event while
+    holding a critical section, the main thread blocked behind it, and the frontend froze
+    after Start with `render_thread` spinning. `XamAlloc` reports heap exhaustion instead
+    of a null pointer under a success code. Upstream runtime commit `8dd8b36`, those files
+    only; one divergence: `XamUserContentRestrictionCheckAccess` returns
+    `X_ERROR_IO_PENDING` once it has queued its completion (upstream still returns success
+    there).
+
 Everything else in `third_party/` is byte-identical to upstream (verified). If you must
 touch it, add an entry here in the same commit as the patch.

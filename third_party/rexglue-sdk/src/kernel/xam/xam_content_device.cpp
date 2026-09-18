@@ -78,18 +78,22 @@ u32 XamContentGetDeviceName_entry(u32 device_id, mapped_wstring name_buffer, u32
 
 u32 XamContentGetDeviceState_entry(u32 device_id, mapped_void overlapped_ptr) {
   auto device_info = GetDummyDeviceInfo(device_id);
+  // Complete on the dispatch thread, never inside the call: signalled early,
+  // dlc_enumerator parked on an already-set event while holding a critical
+  // section and the main thread hung behind it (frontend freeze after Start).
   if (device_info == nullptr) {
     if (overlapped_ptr) {
-      REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(
-          overlapped_ptr.guest_address(), X_ERROR_FUNCTION_FAILED, X_ERROR_DEVICE_NOT_CONNECTED, 0);
+      REX_KERNEL_STATE()->CompleteOverlappedDeferredEx([]() {}, overlapped_ptr.guest_address(),
+                                                       X_ERROR_FUNCTION_FAILED,
+                                                       X_ERROR_DEVICE_NOT_CONNECTED, 0);
       return X_ERROR_IO_PENDING;
     } else {
       return X_ERROR_DEVICE_NOT_CONNECTED;
     }
   }
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(),
-                                                    X_ERROR_SUCCESS);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredEx([]() {}, overlapped_ptr.guest_address(),
+                                                     X_ERROR_SUCCESS, X_ERROR_SUCCESS, 0);
     return X_ERROR_IO_PENDING;
   } else {
     return X_ERROR_SUCCESS;
