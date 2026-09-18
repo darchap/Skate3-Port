@@ -36,8 +36,8 @@ u32 XamContentGetLicenseMask_entry(mapped_u32 mask_ptr, mapped_void overlapped_p
   *mask_ptr = REXCVAR_GET(license_mask);
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(),
-                                                    X_ERROR_SUCCESS);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(),
+                                                      X_ERROR_SUCCESS);
     return X_ERROR_IO_PENDING;
   } else {
     return X_ERROR_SUCCESS;
@@ -271,7 +271,7 @@ u32 XamContentOpenFile_entry(u32 user_index, mapped_string root_name, mapped_str
 u32 XamContentFlush_entry(mapped_string root_name, mapped_void overlapped_ptr) {
   X_RESULT result = X_ERROR_SUCCESS;
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;
@@ -283,7 +283,7 @@ u32 XamContentClose_entry(mapped_string root_name, mapped_void overlapped_ptr) {
   auto result = REX_KERNEL_STATE()->content_manager()->CloseContent(root_name.value());
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;
@@ -318,7 +318,7 @@ u32 XamContentGetCreator_entry(u32 user_index, mapped_void content_data_ptr,
   }
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;
@@ -355,7 +355,7 @@ u32 XamContentGetThumbnail_entry(u32 user_index, mapped_void content_data_ptr,
   }
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;
@@ -374,7 +374,7 @@ u32 XamContentSetThumbnail_entry(u32 user_index, mapped_void content_data_ptr,
                                                                            std::move(buffer));
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;
@@ -389,7 +389,7 @@ u32 XamContentDelete_entry(u32 user_index, mapped_void content_data_ptr,
   auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;
@@ -405,7 +405,7 @@ u32 XamContentDeleteInternal_entry(mapped_void content_data_ptr, mapped_void ove
   auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
 
   if (overlapped_ptr) {
-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+    REX_KERNEL_STATE()->CompleteOverlappedDeferredNow(overlapped_ptr.guest_address(), result);
     return X_ERROR_IO_PENDING;
   } else {
     return result;

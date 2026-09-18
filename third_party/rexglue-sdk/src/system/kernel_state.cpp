@@ -1121,22 +1121,26 @@ void KernelState::CompleteOverlappedDeferred(std::move_only_function<X_RESULT()>
 void KernelState::CompleteOverlappedDeferredEx(
     std::move_only_function<X_RESULT(uint32_t&, uint32_t&)> completion_callback,
     uint32_t overlapped_ptr, std::move_only_function<void()> pre_callback,
-    std::move_only_function<void()> post_callback) {
+    std::move_only_function<void()> post_callback, bool skip_delay) {
   REXSYS_DEBUG("CompleteOverlappedDeferredEx: queuing for overlapped {:08X}", overlapped_ptr);
   auto ptr = memory()->TranslateVirtual(overlapped_ptr);
   XOverlappedSetResult(ptr, X_ERROR_IO_PENDING);
   XOverlappedSetContext(ptr, XThread::GetCurrentThreadHandle());
   auto global_lock = global_critical_region_.Acquire();
   dispatch_queue_.push_back(
-      [this, overlapped_ptr, completion_callback = std::move(completion_callback),
+      [this, overlapped_ptr, skip_delay, completion_callback = std::move(completion_callback),
        pre_callback = std::move(pre_callback), post_callback = std::move(post_callback)]() mutable {
         REXSYS_DEBUG("Deferred overlapped {:08X}: running pre_callback", overlapped_ptr);
         if (pre_callback) {
           pre_callback();
         }
-        REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped_ptr,
-                     kDeferredOverlappedDelayMillis);
-        rex::thread::Sleep(std::chrono::milliseconds(kDeferredOverlappedDelayMillis));
+        // Correctness only needs completion after the caller returned; the
+        // delay is cosmetic for dialog-shaped calls and skipped for queries.
+        const uint32_t delay_ms = skip_delay ? 0u : kDeferredOverlappedDelayMillis;
+        REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped_ptr, delay_ms);
+        if (delay_ms != 0) {
+          rex::thread::Sleep(std::chrono::milliseconds(delay_ms));
+        }
         uint32_t extended_error, length;
         REXSYS_DEBUG("Deferred overlapped {:08X}: running completion", overlapped_ptr);
         auto result = completion_callback(extended_error, length);

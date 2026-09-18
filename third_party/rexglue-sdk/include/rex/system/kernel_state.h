@@ -320,7 +320,21 @@ class KernelState {
   void CompleteOverlappedDeferredEx(
       std::move_only_function<X_RESULT(uint32_t&, uint32_t&)> completion_callback,
       uint32_t overlapped_ptr, std::move_only_function<void()> pre_callback = nullptr,
-      std::move_only_function<void()> post_callback = nullptr);
+      std::move_only_function<void()> post_callback = nullptr, bool skip_delay = false);
+
+  // Completes on the dispatch thread, after the caller has returned. Signalling
+  // inside the call races a caller told X_ERROR_IO_PENDING that has not armed
+  // its wait yet; the query APIs use this so they do not pay the dialog delay.
+  void CompleteOverlappedDeferredNow(uint32_t overlapped_ptr, X_RESULT result,
+                                     uint32_t extended_error = 0, uint32_t length = 0) {
+    CompleteOverlappedDeferredEx(
+        [result, extended_error, length](uint32_t& cb_error, uint32_t& cb_length) -> X_RESULT {
+          cb_error = extended_error ? extended_error : static_cast<uint32_t>(result);
+          cb_length = length;
+          return result;
+        },
+        overlapped_ptr, nullptr, nullptr, /*skip_delay=*/true);
+  }
 
   bool Save(stream::ByteStream* stream);
   bool Restore(stream::ByteStream* stream);
