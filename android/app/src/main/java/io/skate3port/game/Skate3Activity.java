@@ -11,6 +11,8 @@ import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLControllerManager;
 import org.libsdl.app.SDLSurface;
 
+import java.io.File;
+
 
 public class Skate3Activity extends SDLActivity {
     private static final String INPUT_TAG = "Skate3Input";
@@ -92,9 +94,18 @@ public class Skate3Activity extends SDLActivity {
         nativeSetenv("HOME", files);
         nativeSetenv("SKATE3_INTERNAL_FILES_DIR", files);
         nativeSetenv("SKATE3_NATIVE_LIBRARY_DIR", getApplicationInfo().nativeLibraryDir);
-        nativeSetenv("SKATE3_VULKAN_DRIVER_DIR", "");
-        nativeSetenv("SKATE3_VULKAN_DRIVER_NAME", "");
-        Log.i("Skate3GpuDriver", "Selected system driver");
+        GpuDriverInfo driver = GpuDriver.installedDriver(this);
+        if (driver != null && driver.isEnabled()) {
+            // The loader expects a directory path that already ends in a separator.
+            nativeSetenv("SKATE3_VULKAN_DRIVER_DIR",
+                         driver.getDirectory().toAbsolutePath() + File.separator);
+            nativeSetenv("SKATE3_VULKAN_DRIVER_NAME", driver.getLibraryName());
+            Log.i("Skate3GpuDriver", "Selected custom driver: " + driver.label());
+        } else {
+            nativeSetenv("SKATE3_VULKAN_DRIVER_DIR", "");
+            nativeSetenv("SKATE3_VULKAN_DRIVER_NAME", "");
+            Log.i("Skate3GpuDriver", "Selected system driver");
+        }
         GameKeepAliveService.start(this);
         touchController = new TouchControllerView(this);
         mLayout.addView(touchController, new ViewGroup.LayoutParams(

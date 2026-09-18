@@ -93,8 +93,8 @@ private fun hex(bytes: ByteArray): String {
 /**
  * Decide what the launcher should show, from the filesystem alone.
  *
- * [unsupportedReason] and [freeBytes] are passed in because they need Android
- * APIs; everything else this reads is a plain file check.
+ * [unsupportedReason], [freeBytes] and [gpuDriver] are passed in because they
+ * need Android APIs; everything else this reads is a plain file check.
  */
 fun currentState(
     gameDirectory: File,
@@ -102,14 +102,15 @@ fun currentState(
     freeBytes: Long,
     setupLogExists: Boolean,
     unsupportedReason: String?,
+    gpuDriver: String,
 ): InstallState {
     if (unsupportedReason != null) return InstallState.Unsupported(unsupportedReason)
 
     if (isGameReady(gameDirectory.toPath())) {
-        return InstallState.Ready(gameDirectory, canRepair = true)
+        return InstallState.Ready(gameDirectory, canRepair = true, gpuDriver = gpuDriver)
     }
     if (legacyGameReady()) {
-        return InstallState.Ready(LEGACY_ROOT, canRepair = false)
+        return InstallState.Ready(LEGACY_ROOT, canRepair = false, gpuDriver = gpuDriver)
     }
     if (isExtractionComplete(partialDirectory)) return InstallState.AwaitingTitleUpdate
 
@@ -126,7 +127,11 @@ sealed interface InstallState {
     data class Unsupported(val reason: String) : InstallState
 
     /** A playable install exists at [gameRoot]. Legacy installs cannot be repaired. */
-    data class Ready(val gameRoot: File, val canRepair: Boolean) : InstallState
+    data class Ready(
+        val gameRoot: File,
+        val canRepair: Boolean,
+        val gpuDriver: String,
+    ) : InstallState
 
     /** The ISO is extracted; only Title Update 3 is missing. */
     data object AwaitingTitleUpdate : InstallState

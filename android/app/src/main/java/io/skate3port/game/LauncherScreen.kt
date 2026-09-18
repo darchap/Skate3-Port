@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -37,6 +39,7 @@ class LauncherActions(
     @JvmField val pickIso: Runnable,
     @JvmField val play: Runnable,
     @JvmField val repair: Runnable,
+    @JvmField val gpuDriver: Runnable,
     @JvmField val showLog: Runnable,
     @JvmField val finishSetup: Runnable,
     @JvmField val pickTitleUpdate: Runnable,
@@ -109,6 +112,7 @@ private fun Actions(state: InstallState, a: LauncherActions, modifier: Modifier 
 
             is InstallState.Ready -> {
                 Primary("Play Skate 3", Icons.Filled.PlayArrow, a.play)
+                Secondary("GPU driver · " + state.gpuDriver, Icons.Filled.Settings, a.gpuDriver)
                 if (state.canRepair) Secondary("Repair or reinstall", Icons.Filled.Refresh, a.repair)
                 Tertiary("View setup log", a.showLog)
             }
@@ -171,6 +175,9 @@ private fun Secondary(label: String, icon: ImageVector?, onClick: Runnable) {
             label,
             color = Skate3.TextPrimary,
             fontSize = 15.sp,
+            // A driver's own name can be 45 characters; it must not wrap the row.
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = if (icon != null) Skate3.GapS else 0.dp),
         )
     }

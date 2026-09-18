@@ -1,6 +1,7 @@
 package io.skate3port.game
 
 import android.content.ContentResolver
+import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.StatFs
@@ -13,6 +14,7 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
 
 private const val INSTALL_HEADROOM = 512L * 1024 * 1024
+private const val ISO_UNCHANGED = "\n\nYour original ISO was not changed."
 
 /**
  * Everything that writes to disk: extract the ISO, install Title Update 3, then
@@ -87,7 +89,7 @@ class InstallFlow(
                     exception.addSuppressed(cleanupError)
                 }
             }
-            onFailed("Setup stopped: " + cleanMessage(exception), exception)
+            onFailed("Setup stopped: " + cleanMessage(exception) + ISO_UNCHANGED, exception)
         }
     }
 
@@ -96,7 +98,8 @@ class InstallFlow(
             verifyRetailGame(partialDirectory.toPath())
             downloadTitleUpdateAndFinalize()
         } catch (exception: Exception) {
-            onFailed("Title Update setup stopped: " + cleanMessage(exception), exception)
+            onFailed("Title Update setup stopped: " + cleanMessage(exception) + ISO_UNCHANGED,
+                exception)
         }
     }
 
@@ -110,7 +113,24 @@ class InstallFlow(
             }
             promoteStagingDirectory()
         } catch (exception: Exception) {
-            onFailed("Title Update setup stopped: " + cleanMessage(exception), exception)
+            onFailed("Title Update setup stopped: " + cleanMessage(exception) + ISO_UNCHANGED,
+                exception)
+        }
+    }
+
+    fun importGpuDriver(context: Context, uri: Uri) = worker.execute {
+        try {
+            val stream = resolver.openInputStream(uri)
+                ?: throw IOException("Android could not open the selected ZIP.")
+            val driver = stream.use { input -> importDriverPackage(context, input) }
+            appendLog(setupLog, "Imported GPU driver " + driver.label() + ".")
+            onFinished()
+        } catch (exception: Exception) {
+            onFailed(
+                "Could not import the GPU driver: " + cleanMessage(exception) +
+                    "\n\nThe current driver selection was not changed.",
+                exception,
+            )
         }
     }
 
@@ -120,7 +140,7 @@ class InstallFlow(
             deleteRecursively(gameDirectory)
             onFinished()
         } catch (exception: Exception) {
-            onFailed("Cleanup stopped: " + cleanMessage(exception), exception)
+            onFailed("Cleanup stopped: " + cleanMessage(exception) + ISO_UNCHANGED, exception)
         }
     }
 

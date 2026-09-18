@@ -64,6 +64,13 @@ class LauncherActivity : ComponentActivity() {
         install.installFromFile(uri)
     }
 
+    private val gpuDriverPicker = registerForActivityResult(StartActivityForResult()) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        val uri = result.data?.data ?: return@registerForActivityResult
+        setBusy("Importing GPU driver", "Checking " + displayName(this, uri), showProgress = false)
+        install.importGpuDriver(this, uri)
+    }
+
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         // Opening the launcher icon over a live SDL session used to leave its
@@ -89,7 +96,7 @@ class LauncherActivity : ComponentActivity() {
         )
 
         val actions = LauncherActions(
-            ::pickIso, ::launchGame, ::confirmReinstall, ::showLog,
+            ::pickIso, ::launchGame, ::confirmReinstall, ::showGpuDriverMenu, ::showLog,
             ::finishSetupOnline, ::pickTitleUpdate, ::confirmStartOver, ::finish,
         )
         setContent { LauncherScreen(uiState.value, step.intValue, actions) }
@@ -127,6 +134,7 @@ class LauncherActivity : ComponentActivity() {
                 StatFs(storageRoot.absolutePath).availableBytes,
                 setupLog.isFile,
                 compatibilityProblem(this),
+                selectedDriverLabel(this),
             )
         )
     }
@@ -153,6 +161,83 @@ class LauncherActivity : ComponentActivity() {
     private fun pickIso() = openDocument(isoPicker::launch, persistable = true)
 
     private fun pickTitleUpdate() = openDocument(titleUpdatePicker::launch, persistable = false)
+
+    private fun pickGpuDriver() = openDocument(gpuDriverPicker::launch, persistable = false)
+
+    private fun showGpuDriverMenu() {
+        if (!isLikelyAdrenoDevice()) {
+            AlertDialog.Builder(this)
+                .setTitle("GPU driver")
+                .setMessage(
+                    "This device does not report a Snapdragon / Adreno GPU, so a custom " +
+                        "driver cannot load here. Skate 3 stays on the system driver."
+                )
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val driver = installedDriver(this)
+        if (driver == null) {
+            AlertDialog.Builder(this)
+                .setTitle("GPU driver")
+                .setMessage(
+                    "The system driver is selected. You can import a driver package built " +
+                        "for this device. Drivers are device-specific, and an incompatible " +
+                        "one may crash the game at launch."
+                )
+                .setNegativeButton("Close", null)
+                .setPositiveButton("Import driver ZIP") { _, _ -> pickGpuDriver() }
+                .show()
+            return
+        }
+        val marker = "  ·  selected"
+        // A message is not shown beside a list, so the title carries the identity.
+        AlertDialog.Builder(this)
+            .setTitle("GPU driver · " + driver.label())
+            .setItems(
+                arrayOf(
+                    "Use system driver" + if (driver.isEnabled) "" else marker,
+                    "Use " + driver.label() + if (driver.isEnabled) marker else "",
+                    "Import another driver ZIP",
+                    "Remove imported driver",
+                )
+            ) { _, which ->
+                when (which) {
+                    0 -> changeDriver("Could not select the system driver") {
+                        useSystemDriver(this)
+                    }
+                    1 -> confirmCustomGpuDriver(driver)
+                    2 -> pickGpuDriver()
+                    else -> confirmRemoveGpuDriver(driver)
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun confirmCustomGpuDriver(driver: GpuDriverInfo) = confirm(
+        "Use " + driver.label() + "?",
+        driver.vendor + " · " + driver.author +
+            "\n\nOnly Skate 3 uses this driver. If the game crashes at launch, reopen the " +
+            "launcher and select the system driver.",
+        "Use custom driver",
+    ) { changeDriver("Could not select the custom driver") { useCustomDriver(this) } }
+
+    private fun confirmRemoveGpuDriver(driver: GpuDriverInfo) = confirm(
+        "Remove " + driver.label() + "?",
+        "The imported files are deleted and the system driver is selected.",
+        "Remove",
+    ) { changeDriver("Could not remove the imported driver") { removeDriver(this) } }
+
+    // The refreshed row label is the confirmation; nothing else reports success.
+    private fun changeDriver(failure: String, change: () -> Unit) {
+        try {
+            change()
+            refreshInterface()
+        } catch (exception: IOException) {
+            showFailure(failure + ": " + cleanMessage(exception), exception)
+        }
+    }
 
     private fun finishSetupOnline() {
         setBusy("Installing title update 3", "Downloading and verifying 1.7 MB...", true)
@@ -183,12 +268,17 @@ class LauncherActivity : ComponentActivity() {
         "Start over",
     )
 
-    private fun confirm(title: String, message: String, confirmLabel: String) {
+    private fun confirm(
+        title: String,
+        message: String,
+        confirmLabel: String,
+        action: () -> Unit = ::startOver,
+    ) {
         AlertDialog.Builder(this)
             .setTitle(title)
             .setMessage(message)
             .setNegativeButton("Cancel", null)
-            .setPositiveButton(confirmLabel) { _, _ -> startOver() }
+            .setPositiveButton(confirmLabel) { _, _ -> action() }
             .show()
     }
 
@@ -224,7 +314,7 @@ class LauncherActivity : ComponentActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             AlertDialog.Builder(this)
                 .setTitle("Setup needs attention")
-                .setMessage(message + "\n\nYour original ISO was not changed.")
+                .setMessage(message)
                 .setPositiveButton("OK") { _, _ -> refreshInterface() }
                 .show()
         }

@@ -82,6 +82,10 @@ the game looks, not a preset.**
 - **A launcher worth looking at.** Rebuilt around the three steps that matter: pick
   your ISO, install the title update, play. Progress you can actually read, and it
   gets out of the way once the game is installed.
+- **Bring your own GPU driver.** On Snapdragon devices the launcher's GPU driver row
+  imports a driver package from a ZIP and loads it for Skate 3 alone, leaving the rest
+  of the phone on the system driver. The button always says which one the next launch
+  will use, so a driver that crashes takes one tap to undo.
 
 <p align="center">
   <img src="media/benchmark.png" width="560"
