@@ -10,6 +10,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 
 #include <rex/logging.h>
@@ -158,21 +159,38 @@ int lzxdelta_apply_patch(rex::xex2_delta_patch* patch, size_t patch_len, uint32_
     if (cur_patch->compressed_len == 0 && cur_patch->uncompressed_len == 0 &&
         cur_patch->new_addr == 0 && cur_patch->old_addr == 0)
       break;
+    // Source and destination of a copy both live in the image being patched and
+    // can overlap; memcpy is undefined there and bionic picks its direction per
+    // CPU, so the same APK assembled a different executable on Snapdragon 8 Gen 2.
+    const uint32_t new_addr = cur_patch->new_addr;
+    const uint32_t old_addr = cur_patch->old_addr;
+    const uint32_t len = cur_patch->uncompressed_len;
+    const bool overlaps = len != 0 && new_addr < old_addr + len && old_addr < new_addr + len;
     switch (cur_patch->compressed_len) {
       case 0:  // fill with 0
-        std::memset((char*)dest + cur_patch->new_addr, 0, cur_patch->uncompressed_len);
+        std::memset((char*)dest + new_addr, 0, len);
         break;
       case 1:  // copy from old -> new
-        std::memcpy((char*)dest + cur_patch->new_addr, (char*)dest + cur_patch->old_addr,
-                    cur_patch->uncompressed_len);
+        if (overlaps && new_addr != old_addr) {
+          // Once per process: this title has 92 overlapping copies.
+          static std::atomic<bool> announced{false};
+          if (!announced.exchange(true)) {
+            REXLOG_WARN(
+                "XEX patch: in-place copies overlap (first: new {:08X} <- old {:08X} len "
+                "{:X}); using memmove, memcpy would assemble a CPU-dependent executable",
+                new_addr, old_addr, len);
+          }
+        }
+        std::memmove((char*)dest + new_addr, (char*)dest + old_addr, len);
         break;
       default:                                     // delta patch
         patch_sz = cur_patch->compressed_len - 4;  // -4 because of patch_data field
 
+        // The reference window lives inside the image being written. Safe only
+        // because lzx_decompress copies the window into its own buffer first.
         int result = lzx_decompress(cur_patch->patch_data, cur_patch->compressed_len,
-                                    (char*)dest + cur_patch->new_addr, cur_patch->uncompressed_len,
-                                    window_size, (char*)dest + cur_patch->old_addr,
-                                    cur_patch->uncompressed_len);
+                                    (char*)dest + new_addr, len, window_size,
+                                    (char*)dest + old_addr, len);
 
         if (result) {
           return result;
