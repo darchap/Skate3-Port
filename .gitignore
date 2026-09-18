@@ -16,6 +16,16 @@
 /android/*.keystore
 /third_party/rexglue-sdk/out/
 
+# --- Signing material and secrets: never commit ---
+*.jks
+*.keystore
+*.p12
+*password*.txt
+signing.properties
+keystore.properties
+.env
+*.env
+
 # --- IDE / OS noise ---
 /.vs/
 /.idea/
