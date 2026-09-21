@@ -1,0 +1,97 @@
+name: Bug report
+description: Report a reproducible problem in Skate 3 Port
+title: "[BUG] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Do not attach retail game files, game executables, ISOs, or Title Update packages.
+  - type: input
+    id: version
+    attributes:
+      label: Skate 3 Port version
+      description: The launcher's Report a problem button fills this in.
+      placeholder: v1.2.0 (10200)
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: Xiaomi M2012K11AG, Samsung Galaxy S25+, etc.
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android version
+      placeholder: Android 15
+    validations:
+      required: true
+  - type: input
+    id: chipset
+    attributes:
+      label: Chipset and GPU
+      placeholder: Snapdragon 870 / Adreno 650
+    validations:
+      required: true
+  - type: input
+    id: driver
+    attributes:
+      label: GPU driver
+      description: System, or the imported driver's name and version.
+      placeholder: System
+  - type: dropdown
+    id: input
+    attributes:
+      label: Input method
+      options:
+        - Touch controls
+        - Built-in handheld controls
+        - Bluetooth controller
+        - USB controller
+        - Multiple input methods
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the visible problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app
+        2. Select...
+        3. Enter...
+        4. The game...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Diagnostics, logs, screenshots or video
+      description: >
+        The launcher's "Report a problem" button fills this in. **If this box is empty,
+        paste here** - the launcher copied the same details to your clipboard, so long-press
+        and paste. For anything it could not fit, attach the
+        `skate3-report-....txt` file it saved to your Downloads folder by dragging it here.
+        Remove private information first, and do not upload retail game files.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Final checks
+      options:
+        - label: I reproduced this on the current release.
+          required: true
+        - label: I did not attach an ISO, XEX, Title Update package, or other retail game files.
+          required: true
+        - label: >
+            The Diagnostics box above is filled in (pasted from the launcher if it opened
+            empty). Leave unchecked if the app will not start at all.
