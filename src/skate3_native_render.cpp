@@ -68,9 +68,17 @@ REXCVAR_DEFINE_DOUBLE(skate3_guest_fps_cap,
                       "turns that variance into visible irregular judder that no content "
                       "smoothing can fix. An even cap a few fps below the display refresh "
                       "(e.g. 140 on a 144 Hz panel) is the standard VRR recipe: every "
-                      "frame arrives on a steady beat. Precise pacing: coarse sleep to "
-                      "~1.5 ms before the target, then spin.")
+                      "frame arrives on a steady beat. Pacing is an absolute-deadline "
+                      "sleep with skate3_guest_fps_cap_spin_us of spin on the tail.")
     .range(0.0, 1000.0)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_INT32(
+    skate3_guest_fps_cap_spin_us, 300, "Skate 3",
+    "How long the frame cap yield-spins at the end of its wait, in microseconds; 0 "
+    "sleeps the whole way. Android gives a sleeping thread 50 us of timer slack, so a "
+    "few hundred is enough; the old fixed 2000 was an eighth of a 60 fps frame spent "
+    "holding a core the command processor was queued for.")
+    .range(0, 4000)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_BOOL(skate3_guest_fps_cap_auto,
 #if REX_PLATFORM_ANDROID
@@ -358,15 +366,16 @@ void PaceGuestFrame() {
     s_next = now + interval;
     return;
   }
-  // Coarse sleep to ~1.5 ms before the target, then spin for precision.
-  while (true) {
-    const auto remaining = s_next - std::chrono::steady_clock::now();
-    if (remaining <= std::chrono::steady_clock::duration::zero()) {
-      break;
-    }
-    if (remaining > std::chrono::milliseconds(2)) {
-      std::this_thread::sleep_for(remaining - std::chrono::milliseconds(2));
-    } else if (remaining > std::chrono::microseconds(50)) {
+  // Sleep to the deadline and spin only the tail. This thread's yield loop is
+  // not free time: it holds a core the command processor is queued behind.
+  const auto spin_window =
+      std::chrono::microseconds(REXCVAR_GET(skate3_guest_fps_cap_spin_us));
+  const auto wake_at = s_next - spin_window;
+  if (std::chrono::steady_clock::now() < wake_at) {
+    std::this_thread::sleep_until(wake_at);
+  }
+  if (spin_window.count() > 0) {
+    while (std::chrono::steady_clock::now() < s_next) {
       std::this_thread::yield();
     }
   }
