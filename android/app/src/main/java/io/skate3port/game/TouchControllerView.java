@@ -6,12 +6,13 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.hardware.input.InputManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.SparseArray;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
-
-import org.libsdl.app.SDLControllerManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,9 @@ public final class TouchControllerView extends View {
     private final SparseArray<Control> pointers = new SparseArray<>();
     private final SharedPreferences preferences;
     private boolean controlsVisible;
+    // A real controller hides the touch pad and its toggle; the preference is what
+    // comes back when that controller goes away.
+    private boolean controllerConnected;
     private RectF toggle = new RectF();
     private float lastWidth;
     private float lastHeight;
@@ -62,9 +66,42 @@ public final class TouchControllerView extends View {
         label.setTextAlign(Paint.Align.CENTER);
         label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        controlsVisible = preferences.contains(PREF_VISIBLE)
-            ? preferences.getBoolean(PREF_VISIBLE, true)
-            : !hasPhysicalController();
+        controlsVisible = preferences.getBoolean(PREF_VISIBLE, true);
+        controllerConnected = hasPhysicalController();
+    }
+
+    private final InputManager.InputDeviceListener deviceListener =
+        new InputManager.InputDeviceListener() {
+            @Override
+            public void onInputDeviceAdded(int deviceId) {
+                refreshControllerState();
+            }
+
+            @Override
+            public void onInputDeviceRemoved(int deviceId) {
+                refreshControllerState();
+            }
+
+            @Override
+            public void onInputDeviceChanged(int deviceId) {
+                refreshControllerState();
+            }
+        };
+
+    private void refreshControllerState() {
+        boolean connected = hasPhysicalController();
+        if (connected == controllerConnected) return;
+        controllerConnected = connected;
+        // Whatever was held when the pad disappears would stay pressed in the guest.
+        for (Control control : controls) control.release();
+        pointers.clear();
+        sendState();
+        invalidate();
+    }
+
+    /** False while a physical controller is connected: no pad, no toggle. */
+    private boolean touchControlsUsable() {
+        return !controllerConnected;
     }
 
     public void clearInput() {
@@ -83,11 +120,18 @@ public final class TouchControllerView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        InputManager manager = getContext().getSystemService(InputManager.class);
+        if (manager != null) {
+            manager.registerInputDeviceListener(deviceListener, new Handler(Looper.getMainLooper()));
+        }
+        refreshControllerState();
         sendState();
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        InputManager manager = getContext().getSystemService(InputManager.class);
+        if (manager != null) manager.unregisterInputDeviceListener(deviceListener);
         disconnect();
         super.onDetachedFromWindow();
     }
@@ -151,6 +195,7 @@ public final class TouchControllerView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        if (!touchControlsUsable()) return;
         drawToggle(canvas);
         if (!controlsVisible) return;
         for (Control control : controls) control.draw(canvas);
@@ -167,6 +212,8 @@ public final class TouchControllerView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (!touchControlsUsable()) return false;
+
         int action = event.getActionMasked();
         int index = event.getActionIndex();
         int pointerId = event.getPointerId(index);
@@ -236,6 +283,13 @@ public final class TouchControllerView extends View {
     }
 
     private void sendState() {
+        if (!touchControlsUsable()) {
+            // SDL polls for new joysticks every 3 s. Reporting the pad as gone the moment
+            // a controller appears would leave guest user 0 unplugged until then, which
+            // the game answers with its controller-disconnected screen.
+            TouchControllerBridge.trySetState(controlsVisible ? 0 : -1, 0, 0, 0, 0, 0, 0);
+            return;
+        }
         if (!controlsVisible) {
             TouchControllerBridge.trySetState(-1, 0, 0, 0, 0, 0, 0);
             return;
@@ -252,9 +306,18 @@ public final class TouchControllerView extends View {
             rightTrigger != null && rightTrigger.inUse ? 1 : 0);
     }
 
+    // Gamepads and joysticks only: SDL's own predicate also accepts a bare D-pad, and a
+    // Bluetooth keyboard reporting one would hide the pad with no way to bring it back.
     private boolean hasPhysicalController() {
         for (int deviceId : InputDevice.getDeviceIds()) {
-            if (SDLControllerManager.isDeviceSDLJoystick(deviceId)) return true;
+            if (deviceId < 0) continue;
+            InputDevice device = InputDevice.getDevice(deviceId);
+            if (device == null || device.isVirtual()) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                || (sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
+                return true;
+            }
         }
         return false;
     }
