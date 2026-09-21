@@ -161,6 +161,64 @@ uint32_t ScaledThresholdBits(uint32_t base_bits) {
   return bits;
 }
 
+// SceneRenderView LOD distances: six squared floats at 23760..23780.
+constexpr uint32_t kLodDistanceFirst = 23760;
+constexpr uint32_t kLodDistanceCount = 6;
+
+// Latched like the cull threshold: derive from what the guest wrote, never
+// from our own previous output, so a view the guest stops rewriting holds.
+struct LodDistanceSlot {
+  uint32_t view = 0;
+  float base_v[kLodDistanceCount] = {};
+  float written[kLodDistanceCount] = {};
+  bool valid = false;
+};
+std::mutex g_lod_slots_mutex;
+// ponytail: 16 fixed slots like the cull table; a view past that gets no scaling.
+// Round-robin reuse if a session ever creates more views than this.
+LodDistanceSlot g_lod_slots[16];
+size_t g_lod_slot_count = 0;
+
+void ScaleLodDistances(uint8_t* base, uint32_t view) {
+  const double lod_scale = REXCVAR_GET(skate3_lod_distance_scale);
+  const bool scaling = std::abs(lod_scale - 1.0) > kScaleEpsilon && lod_scale > 0.0;
+  std::lock_guard<std::mutex> lock(g_lod_slots_mutex);
+  LodDistanceSlot* slot = nullptr;
+  for (size_t i = 0; i < g_lod_slot_count; ++i) {
+    if (g_lod_slots[i].view == view) {
+      slot = &g_lod_slots[i];
+      break;
+    }
+  }
+  if (slot == nullptr) {
+    if (!scaling) {
+      return;
+    }
+    if (g_lod_slot_count >= sizeof(g_lod_slots) / sizeof(g_lod_slots[0])) {
+      return;
+    }
+    slot = &g_lod_slots[g_lod_slot_count++];
+    slot->view = view;
+    slot->valid = false;
+  }
+  const double squared = lod_scale * lod_scale;
+  for (uint32_t i = 0; i < kLodDistanceCount; ++i) {
+    const uint32_t addr = view + kLodDistanceFirst + i * 4;
+    const float current = LoadGuestF32(base, addr);
+    // A value we did not write is the guest's own: re-latch it.
+    if (!slot->valid || current != slot->written[i]) {
+      slot->base_v[i] = current;
+    }
+    const float want =
+        scaling ? float(double(slot->base_v[i]) * squared) : slot->base_v[i];
+    if (want != current) {
+      StoreGuestF32(base, addr, want);
+    }
+    slot->written[i] = want;
+  }
+  slot->valid = true;
+}
+
 void EnsureCullThresholdScaled(uint8_t* base, uint32_t cull_object) {
   if (!PlausibleGuestAddr(cull_object)) {
     return;
@@ -733,14 +791,8 @@ extern "C" REX_FUNC(sub_827E1AD8) {
   if (!PlausibleGuestAddr(view)) {
     return;
   }
-  const double lod_scale = REXCVAR_GET(skate3_lod_distance_scale);
-  if (std::abs(lod_scale - 1.0) > kScaleEpsilon) {
-    const double squared = lod_scale * lod_scale;
-    for (uint32_t offset = 23760; offset <= 23780; offset += 4) {
-      const uint32_t addr = view + offset;
-      StoreGuestF32(base, addr,
-                    float(double(LoadGuestF32(base, addr)) * squared));
-    }
-  }
+  // Multiplying in place compounded whenever the guest skipped its per-frame
+  // rewrite (menus): at 0.5 each repeat is x0.25 and the distances reach zero.
+  ScaleLodDistances(base, view);
   EnsureCullThresholdScaled(base, LoadGuestU32(base, view + 8));
 }
