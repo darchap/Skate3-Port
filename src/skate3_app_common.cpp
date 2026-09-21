@@ -632,18 +632,13 @@ void Skate3BaseApp::OnConfigurePaths(rex::PathConfig& paths) {
 
   // Internal pacing/stability cvars with no menu row. Pinned every boot; every
   // user-facing setting is deliberately absent so the saved settings file wins.
+  // Visual features (splines, entity fade, cloth blend, smooth camera, the
+  // editor outline) are not pinned: they keep the renderer's defaults.
   constexpr std::pair<std::string_view, std::string_view> kAndroidBaseline[] = {
       {"native_render_suppress_mode", "1"},
       {"skate3_native_render_scene_ssr", "false"},
       {"skate3_native_render_scene_hdr", "false"},
-      {"skate3_native_render_scene_smooth_camera", "false"},
-      {"skate3_native_render_scene_selection_outline", "false"},
       {"skate3_native_render_scene_sort_opaque", "false"},
-      {"skate3_native_render_scene_ropa_blend", "false"},
-      {"skate3_native_render_scene_entity_fade", "false"},
-      {"skate3_native_render_scene_lw_fade", "false"},
-      {"skate3_native_render_scene_lw_gap_fill", "false"},
-      {"skate3_native_render_scene_lw_identity", "false"},
       {"skate3_native_render_scene_lw_palette", "false"},
       {"skate3_native_render_scene_prewarm_budget_ms", "8"},
       {"skate3_native_render_scene_occlusion_cull", "true"},
