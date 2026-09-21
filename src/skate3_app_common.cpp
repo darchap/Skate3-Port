@@ -639,7 +639,6 @@ void Skate3BaseApp::OnConfigurePaths(rex::PathConfig& paths) {
       {"skate3_native_render_scene_smooth_camera", "false"},
       {"skate3_native_render_scene_selection_outline", "false"},
       {"skate3_native_render_scene_sort_opaque", "false"},
-      {"skate3_native_render_scene_splines", "false"},
       {"skate3_native_render_scene_ropa_blend", "false"},
       {"skate3_native_render_scene_entity_fade", "false"},
       {"skate3_native_render_scene_lw_fade", "false"},
