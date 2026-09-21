@@ -2034,6 +2034,13 @@ static av_cold int xmaframes_decode_end(AVCodecContext* avctx)
     return 0;
 }
 
+/* Without this avcodec_flush_buffers() leaves channel[i].out untouched, and a
+ * reused context overlap-adds the previous sound's tail into the next one. */
+static av_cold void xmaframes_flush(AVCodecContext *avctx)
+{
+    flush((WMAProDecodeCtx *)avctx->priv_data);
+}
+
 
 /**
  *@brief Decode a single WMA frame. Packet parsing is out of this decoders scope.
@@ -2152,6 +2159,7 @@ AVCodec ff_xmaframes_decoder = {
     .init           = xmaframes_decode_init,
     .close          = xmaframes_decode_end,
     .decode         = xmaframes_decode_packet,
+    .flush          = xmaframes_flush,
     .capabilities   = AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,

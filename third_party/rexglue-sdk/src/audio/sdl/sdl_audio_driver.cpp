@@ -320,6 +320,9 @@ void SDLAudioDriver::SDLCallback(void* userdata, SDL_AudioStream* stream, int ad
             conversion::sequential_6_BE_to_interleaved_6_LE(data, buffer, channel_samples_);
             break;
           default:
+            // data is alloca'd and assert_unhandled_case is nothing under NDEBUG:
+            // an unexpected channel count would push raw stack to the speaker.
+            std::memset(data, 0, len);
             assert_unhandled_case(driver->sdl_device_channels_);
             break;
         }
