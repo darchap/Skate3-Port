@@ -536,6 +536,10 @@ void XmaContext::StoreContextMerged(const XMA_CONTEXT_DATA& data,
   // DWORD 2: input_buffer_read_offset (0-25) + error_status (26-30).
   cas_update(2, 0x7FFFFFFFu, d[2] & 0x7FFFFFFFu);
 
+  // DWORD 3: parser_error_status (26-30) + parser_error_set (31). loop_start shares
+  // this dword and is game-owned (XMASetLoopData), so mask to the error bits only.
+  cas_update(3, 0xFC000000u, d[3] & 0xFC000000u);
+
   // DWORD 4: current_buffer (bit 31).
   cas_update(4, 0x80000000u, d[4] & 0x80000000u);
 }
@@ -846,8 +850,9 @@ bool XmaContext::WorkOldFrameDecoder() {
 
   auto context_ptr = memory()->TranslateVirtual(guest_ptr());
   XMA_CONTEXT_DATA data(context_ptr);
+  const XMA_CONTEXT_DATA initial_data = data;
   DecodeOldFrame(&data);
-  data.Store(context_ptr);
+  StoreContextMerged(data, initial_data, context_ptr);
   return true;
 }
 
@@ -855,6 +860,14 @@ bool XmaContext::TrySetupNextLoopOld(XMA_CONTEXT_DATA* data,
                                      bool ignore_input_buffer_offset) {
   if (data->loop_count > 0 && data->loop_start < data->loop_end &&
       (ignore_input_buffer_offset || data->input_buffer_read_offset >= data->loop_end)) {
+    // loop_start is a stream offset; with single-packet double-buffering it is
+    // routinely past the mapped buffer, and applying it trips the range check.
+    const uint32_t packet_count = data->current_buffer ? data->input_buffer_1_packet_count
+                                                       : data->input_buffer_0_packet_count;
+    const uint32_t size_bits = packet_count * kBytesPerPacket * 8;
+    if (size_bits && data->loop_start >= size_bits) {
+      return false;
+    }
     data->input_buffer_read_offset = data->loop_start;
     if (data->loop_count < 255) {
       data->loop_count--;
@@ -1086,10 +1099,16 @@ void XmaContext::DecodeOldFrame(XMA_CONTEXT_DATA* data) {
     BitStream stream(current_input_buffer, current_input_size * 8);
     stream.SetOffset(data->input_buffer_read_offset);
 
-    if (data->input_buffer_read_offset > current_input_size * 8) {
-      REXAPU_ERROR("XmaContext {} old: input offset {} exceeds buffer size {}", id(),
-                   uint32_t(data->input_buffer_read_offset), current_input_size * 8);
+    // >= not >: an offset exactly on the end is a consumed buffer; > let it reach a
+    // branch that bailed without swapping and stalled the voice.
+    const uint32_t input_size_bits = current_input_size * 8;
+    if (data->input_buffer_read_offset >= input_size_bits) {
+      REXAPU_NOISY_DEBUG("XmaContext {} old: input buffer consumed ({} >= {}), swapping", id(),
+                         uint32_t(data->input_buffer_read_offset), input_size_bits);
       SwapInputBuffer(data);
+      if (is_streaming) {
+        data->input_buffer_read_offset = GetPacketFirstFrameOffsetOld(data);
+      }
       return;
     }
 
@@ -1189,7 +1208,7 @@ void XmaContext::DecodeOldFrame(XMA_CONTEXT_DATA* data) {
 
       PrepareDecoder(data->sample_rate, bool(data->is_stereo));
 
-      const bool frame_is_split = frame_last_split && (frame_idx >= frame_count - 1);
+      bool frame_is_split = frame_last_split && (frame_idx >= frame_count - 1);
       stream = BitStream(current_input_buffer, (packet_idx + 1) * kBitsPerPacket);
       stream.SetOffset(data->input_buffer_read_offset);
       old_split_frame_len_partial_ = static_cast<uint32_t>(stream.BitsRemaining());
@@ -1197,6 +1216,12 @@ void XmaContext::DecodeOldFrame(XMA_CONTEXT_DATA* data) {
         old_split_frame_len_ = static_cast<uint32_t>(stream.Peek(kBitsPerFrameHeader));
       } else {
         old_split_frame_len_ = xma::kMaxFrameLength + 1;
+      }
+
+      // A frame that does not fit the packet remainder is split; the frame-count
+      // scan misses a header that straddles the packet boundary.
+      if (old_split_frame_len_ > old_split_frame_len_partial_) {
+        frame_is_split = true;
       }
 
       xma_frame_.fill(0);
@@ -1321,6 +1346,24 @@ void XmaContext::DecodeOldFrame(XMA_CONTEXT_DATA* data) {
                          uint32_t(data->input_buffer_read_offset));
       return;
     }
+
+    // GetNextFrameOld can return one packet header past the buffer end; storing
+    // that trips the range check next call and swaps mid-stream.
+    if (offset >= current_input_size * 8) {
+      if (!reuse_input_buffer) {
+        reuse_input_buffer = TrySetupNextLoopOld(data, true);
+      }
+      if (!reuse_input_buffer) {
+        if (is_streaming) {
+          SwapInputBuffer(data);
+          data->input_buffer_read_offset = GetPacketFirstFrameOffsetOld(data);
+        } else {
+          old_is_stream_done_ = true;
+        }
+      }
+      break;
+    }
+
     data->input_buffer_read_offset = offset;
   }
 
