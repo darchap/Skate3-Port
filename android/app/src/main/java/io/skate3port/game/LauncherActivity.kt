@@ -97,7 +97,8 @@ class LauncherActivity : ComponentActivity() {
 
         val actions = LauncherActions(
             ::pickIso, ::launchGame, ::confirmReinstall, ::showGpuDriverMenu, ::showLog,
-            ::finishSetupOnline, ::pickTitleUpdate, ::confirmStartOver, ::finish,
+            ::finishSetupOnline, ::pickTitleUpdate, ::confirmStartOver, ::reportProblem,
+            ::finish,
         )
         setContent { LauncherScreen(uiState.value, step.intValue, actions) }
         refreshInterface()
@@ -286,6 +287,9 @@ class LauncherActivity : ComponentActivity() {
         setBusy("Cleaning up", "Removing this app's installed copy...", showProgress = false)
         install.wipe()
     }
+
+    private fun reportProblem() =
+        BugReporter.show(this, isGameReady(gameDirectory.toPath()) || legacyGameReady())
 
     private fun showLog() {
         AlertDialog.Builder(this)
