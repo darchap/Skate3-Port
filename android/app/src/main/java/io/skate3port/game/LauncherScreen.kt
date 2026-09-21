@@ -44,6 +44,7 @@ class LauncherActions(
     @JvmField val finishSetup: Runnable,
     @JvmField val pickTitleUpdate: Runnable,
     @JvmField val startOver: Runnable,
+    @JvmField val report: Runnable,
     @JvmField val close: Runnable,
 )
 
@@ -130,6 +131,7 @@ private fun Actions(state: InstallState, a: LauncherActions, modifier: Modifier 
 
             is InstallState.Busy -> Unit // work in flight: nothing to offer
         }
+        if (state !is InstallState.Busy) Tertiary("Report a problem", a.report)
     }
 }
 
