@@ -96,12 +96,13 @@ class LauncherActivity : ComponentActivity() {
         )
 
         val actions = LauncherActions(
-            ::pickIso, ::launchGame, ::confirmReinstall, ::showGpuDriverMenu, ::showLog,
-            ::finishSetupOnline, ::pickTitleUpdate, ::confirmStartOver, ::reportProblem,
+            ::pickIso, ::launchGame, ::confirmReinstall, ::showGpuDriverMenu, ::showUpdateMenu,
+            ::showLog, ::finishSetupOnline, ::pickTitleUpdate, ::confirmStartOver, ::reportProblem,
             ::finish,
         )
         setContent { LauncherScreen(uiState.value, step.intValue, actions) }
         refreshInterface()
+        if (shouldAutoCheck(this)) checkForUpdates(announceCurrent = false)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -136,6 +137,7 @@ class LauncherActivity : ComponentActivity() {
                 setupLog.isFile,
                 compatibilityProblem(this),
                 selectedDriverLabel(this),
+                channel(this).label,
             )
         )
     }
@@ -253,6 +255,78 @@ class LauncherActivity : ComponentActivity() {
         }
         startActivity(Intent(this, Skate3Activity::class.java))
         finish()
+    }
+
+    private fun showUpdateMenu() {
+        val current = channel(this)
+        val marker = "  ·  in use"
+        AlertDialog.Builder(this)
+            .setTitle("Updates · " + installedVersion(this))
+            .setItems(
+                arrayOf(
+                    "Check now",
+                    UpdateChannel.STABLE.label + if (current == UpdateChannel.STABLE) marker else "",
+                    UpdateChannel.BETA.label + if (current == UpdateChannel.BETA) marker else "",
+                )
+            ) { _, which ->
+                when (which) {
+                    0 -> checkForUpdates(announceCurrent = true)
+                    1 -> selectChannel(UpdateChannel.STABLE)
+                    else -> selectChannel(UpdateChannel.BETA)
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun selectChannel(channel: UpdateChannel) {
+        setChannel(this, channel)
+        refreshInterface()
+        checkForUpdates(announceCurrent = true)
+    }
+
+    /** Network on a worker; the result comes back to the UI thread. */
+    private fun checkForUpdates(announceCurrent: Boolean) {
+        Thread {
+            val update = try {
+                checkForUpdate(this)
+            } catch (exception: IOException) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (announceCurrent) {
+                        Toast.makeText(
+                            this,
+                            "Could not check for updates: " + cleanMessage(exception),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+                return@Thread
+            }
+            if (!announceCurrent) markAutoChecked(this)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (update != null) {
+                    offerUpdate(update)
+                } else if (announceCurrent) {
+                    Toast.makeText(this, "You are up to date.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun offerUpdate(update: Release) = confirm(
+        "Version " + update.version + " is available",
+        (if (update.notes.isBlank()) "" else update.notes.take(600) + "\n\n") +
+            "Installing it keeps your extracted game files. Do not uninstall this app first, " +
+            "that deletes them.",
+        "Open download page",
+    ) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.pageUrl)))
+        } catch (exception: ActivityNotFoundException) {
+            showFailure("Android could not open a browser.", exception)
+        }
     }
 
     private fun confirmReinstall() = confirm(
