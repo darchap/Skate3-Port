@@ -327,8 +327,21 @@ bool UserRequestedMovieSkip() {
   rex::input::X_INPUT_GAMEPAD pad;
   const bool down =
       input->GetUiGamepadState(&pad) && (pad.buttons & kSkipButtons) != 0;
+  // Guest main thread only (statics). Polled only while a movie ticks, so the
+  // held state is stale between movies. Completing a movie in its first frames
+  // leaves the screen it belongs to empty and deaf to input (measured: skips
+  // 8-24 ms in froze the front end, 1.8 s in was fine).
+  using Clock = std::chrono::steady_clock;
+  static Clock::time_point s_last_poll{};
+  static Clock::time_point s_movie_start{};
+  const auto now = Clock::now();
+  if (now - s_last_poll > std::chrono::milliseconds(250)) {
+    s_movie_start = now;
+  }
+  s_last_poll = now;
+  const bool armed = now - s_movie_start >= std::chrono::milliseconds(500);
   const bool was_down = s_was_down.exchange(down, std::memory_order_relaxed);
-  if (down && !was_down) {
+  if (down && !was_down && armed) {
     REXLOG_INFO("Skate 3: frontend movie skipped by user input");
     return true;
   }
