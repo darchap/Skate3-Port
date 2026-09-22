@@ -632,12 +632,16 @@ void Skate3BaseApp::OnConfigurePaths(rex::PathConfig& paths) {
 
   // Internal pacing/stability cvars with no menu row. Pinned every boot; every
   // user-facing setting is deliberately absent so the saved settings file wins.
-  // Visual features (splines, entity fade, cloth blend, smooth camera, the
-  // editor outline) are not pinned: they keep the renderer's defaults.
+  // Visual features (splines, entity fade, cloth blend, the editor outline) are
+  // not pinned: they keep the renderer's defaults.
   constexpr std::pair<std::string_view, std::string_view> kAndroidBaseline[] = {
       {"native_render_suppress_mode", "1"},
       {"skate3_native_render_scene_ssr", "false"},
       {"skate3_native_render_scene_hdr", "false"},
+      // The smooth camera lags one sim interval behind the guest. At a 30 fps cap
+      // the sim ticks once per frame, so the camera trails the skater by a whole
+      // frame and the character judders against a smooth world.
+      {"skate3_native_render_scene_smooth_camera", "false"},
       {"skate3_native_render_scene_sort_opaque", "false"},
       {"skate3_native_render_scene_lw_palette", "false"},
       {"skate3_native_render_scene_prewarm_budget_ms", "8"},
