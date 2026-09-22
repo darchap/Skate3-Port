@@ -34,9 +34,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TreeSet;
 import java.util.zip.GZIPInputStream;
 
 final class BugReporter {
@@ -123,6 +125,9 @@ final class BugReporter {
             "Android: " + android + "\n" +
             "SoC: " + soc + "\n" +
             "Hardware: " + clean(Build.HARDWARE) + "\n" +
+            "Build: " + clean(Build.FINGERPRINT) + "\n" +
+            "CPU: " + cpuLayout() + "\n" +
+            "Game folder: " + mountType(storageRoot) + "\n" +
             "ABI: " + String.join(", ", Build.SUPPORTED_ABIS) + "\n" +
             "Memory page: " + pageSize + " bytes\n" +
             "Vulkan feature: " + vulkan + "\n" +
@@ -628,6 +633,52 @@ final class BugReporter {
     // vanishes as an HTML tag. A code fence shows the text as written.
     private static String fenced(String text) {
         return "```text\n" + text + "\n```";
+    }
+
+    /**
+     * Cluster layout as "4x1.80 + 3x2.42 + 1x2.84 GHz". Thread placement and every
+     * performance reading depend on which cores a device actually has.
+     */
+    private static String cpuLayout() {
+        List<Integer> speeds = new ArrayList<>();
+        for (int cpu = 0; cpu < 32; cpu++) {
+            String khz = readSmallFile(new File(
+                "/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/cpuinfo_max_freq"));
+            if (khz == null || khz.trim().isEmpty()) break;
+            try {
+                speeds.add(Integer.parseInt(khz.trim()));
+            } catch (NumberFormatException ignored) {
+                break;
+            }
+        }
+        if (speeds.isEmpty()) return "unknown";
+        StringBuilder out = new StringBuilder();
+        for (int speed : new TreeSet<>(speeds)) {
+            if (out.length() > 0) out.append(" + ");
+            out.append(Collections.frequency(speeds, speed)).append('x')
+                .append(String.format(Locale.US, "%.2f", speed / 1000000.0));
+        }
+        return out.append(" GHz").toString();
+    }
+
+    /**
+     * Filesystem the game folder sits on. A FUSE-mounted Android/data behaves
+     * differently enough during extraction to be worth knowing from a report.
+     */
+    private static String mountType(File path) {
+        String mounts = readSmallFile(new File("/proc/mounts"));
+        if (mounts == null || path == null) return "unknown";
+        String longest = "";
+        String type = "unknown";
+        for (String line : mounts.split("\n")) {
+            String[] parts = line.split(" ");
+            if (parts.length < 3) continue;
+            if (path.getAbsolutePath().startsWith(parts[1]) && parts[1].length() > longest.length()) {
+                longest = parts[1];
+                type = parts[2];
+            }
+        }
+        return type;
     }
 
     private static String clean(String value) {
