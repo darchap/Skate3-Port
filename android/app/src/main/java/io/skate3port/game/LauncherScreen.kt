@@ -211,7 +211,8 @@ private fun headline(state: InstallState): String = when (state) {
 private fun detail(state: InstallState): String = when (state) {
     is InstallState.Unsupported -> state.reason
     is InstallState.Ready ->
-        Build.MODEL + "\n" + state.gameRoot.absolutePath
+        Build.MODEL + "\n" + state.gameRoot.absolutePath +
+            (state.lastSession?.let { "\n\n" + it } ?: "")
     InstallState.AwaitingTitleUpdate ->
         "Download the verified 1.7 MB Title Update 3, or pick the package yourself."
     is InstallState.NeedsIso ->

@@ -138,6 +138,7 @@ class LauncherActivity : ComponentActivity() {
                 compatibilityProblem(this),
                 selectedDriverLabel(this),
                 channel(this).label,
+                BugReporter.lastSessionEnding(this),
             )
         )
     }

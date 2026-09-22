@@ -104,16 +104,17 @@ fun currentState(
     unsupportedReason: String?,
     gpuDriver: String,
     updateChannel: String,
+    lastSession: String?,
 ): InstallState {
     if (unsupportedReason != null) return InstallState.Unsupported(unsupportedReason)
 
     if (isGameReady(gameDirectory.toPath())) {
         return InstallState.Ready(gameDirectory, canRepair = true, gpuDriver = gpuDriver,
-            updateChannel = updateChannel)
+            updateChannel = updateChannel, lastSession = lastSession)
     }
     if (legacyGameReady()) {
         return InstallState.Ready(LEGACY_ROOT, canRepair = false, gpuDriver = gpuDriver,
-            updateChannel = updateChannel)
+            updateChannel = updateChannel, lastSession = lastSession)
     }
     if (isExtractionComplete(partialDirectory)) return InstallState.AwaitingTitleUpdate
 
@@ -135,6 +136,7 @@ sealed interface InstallState {
         val canRepair: Boolean,
         val gpuDriver: String,
         val updateChannel: String,
+        val lastSession: String?,
     ) : InstallState
 
     /** The ISO is extracted; only Title Update 3 is missing. */

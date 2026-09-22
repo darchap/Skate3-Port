@@ -563,6 +563,34 @@ final class BugReporter {
         return clean(safe);
     }
 
+    /**
+     * How the last session ended, when that is worth telling the player: Android
+     * reclaiming the process, or a crash. Returns null for an ordinary exit, which
+     * is what almost every launch follows.
+     */
+    static String lastSessionEnding(Context context) {
+        try {
+            List<ApplicationExitInfo> exits = context.getSystemService(ActivityManager.class)
+                .getHistoricalProcessExitReasons(context.getPackageName(), 0, 1);
+            if (exits.isEmpty()) return null;
+            switch (exits.get(0).getReason()) {
+                case ApplicationExitInfo.REASON_LOW_MEMORY:
+                    return "Android closed the last session to free memory.";
+                case ApplicationExitInfo.REASON_CRASH:
+                case ApplicationExitInfo.REASON_CRASH_NATIVE:
+                    return "The last session ended in a crash.";
+                case ApplicationExitInfo.REASON_ANR:
+                    return "The last session stopped responding and was closed.";
+                case ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE:
+                    return "Android closed the last session for using too much memory or power.";
+                default:
+                    return null;
+            }
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
     private static String reasonName(int reason) {
         switch (reason) {
             case ApplicationExitInfo.REASON_EXIT_SELF: return "normal self-exit";
