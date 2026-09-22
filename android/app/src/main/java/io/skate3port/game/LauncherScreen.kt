@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -40,6 +41,7 @@ class LauncherActions(
     @JvmField val play: Runnable,
     @JvmField val repair: Runnable,
     @JvmField val gpuDriver: Runnable,
+    @JvmField val updates: Runnable,
     @JvmField val showLog: Runnable,
     @JvmField val finishSetup: Runnable,
     @JvmField val pickTitleUpdate: Runnable,
@@ -114,6 +116,7 @@ private fun Actions(state: InstallState, a: LauncherActions, modifier: Modifier 
             is InstallState.Ready -> {
                 Primary("Play Skate 3", Icons.Filled.PlayArrow, a.play)
                 Secondary("GPU driver · " + state.gpuDriver, Icons.Filled.Settings, a.gpuDriver)
+                Secondary("Updates · " + state.updateChannel, Icons.Filled.Info, a.updates)
                 if (state.canRepair) Secondary("Repair or reinstall", Icons.Filled.Refresh, a.repair)
                 Tertiary("View setup log", a.showLog)
             }
