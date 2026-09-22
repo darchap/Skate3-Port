@@ -15,5 +15,12 @@
         <item name="android:windowBackground">#10171C</item>
         <item name="android:textColorPrimary">#FFFFFFFF</item>
         <item name="android:textColorSecondary">#FFCBD3D8</item>
+        <item name="android:windowTitleStyle">@style/AppAlertDialogTitle</item>
+    </style>
+
+    <!-- Dialog titles carry the identity here - the driver, the version - so they
+         lead larger than the stock 20sp. -->
+    <style name="AppAlertDialogTitle" parent="android:TextAppearance.Material.DialogWindowTitle">
+        <item name="android:textSize">24sp</item>
     </style>
 </resources>
