@@ -18,6 +18,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -71,6 +72,13 @@ REXCVAR_DEFINE_DOUBLE(skate3_guest_fps_cap,
                       "frame arrives on a steady beat. Pacing is an absolute-deadline "
                       "sleep with skate3_guest_fps_cap_spin_us of spin on the tail.")
     .range(0.0, 1000.0)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_INT32(
+    skate3_frame_stats_seconds, 10, "Skate 3",
+    "Log a frame-time summary this often, in seconds (0 = off). Nothing else records "
+    "how long a guest frame took while the native scene is on, so a report that says "
+    "\"it slowed down for a few seconds\" is otherwise unreadable.")
+    .range(0, 600)
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 REXCVAR_DEFINE_INT32(
     skate3_guest_fps_cap_spin_us, 300, "Skate 3",
@@ -382,8 +390,56 @@ void PaceGuestFrame() {
   s_next += interval;
 }
 
+// Delivered frame times, measured after the pacer so this is the cadence the
+// player actually sees. The mean answers "was it slow for a while", the worst
+// and the over-budget count answer "did it hitch", which is the whole
+// difference between the two reports we cannot currently tell apart.
+void RecordFrameTime() {
+  using Clock = std::chrono::steady_clock;
+  static Clock::time_point s_previous{};
+  static Clock::time_point s_window{};
+  static uint32_t s_frames = 0;
+  static uint32_t s_over = 0;
+  static int64_t s_worst_us = 0;
+
+  const auto now = Clock::now();
+  const auto previous = std::exchange(s_previous, now);
+  const int32_t period = REXCVAR_GET(skate3_frame_stats_seconds);
+  const int64_t frame_us =
+      previous.time_since_epoch().count() == 0
+          ? 0
+          : std::chrono::duration_cast<std::chrono::microseconds>(now - previous).count();
+  // A gap that long is a load or a spell in the background, not a frame; it
+  // would swamp the window it landed in.
+  if (period <= 0 || frame_us == 0 || frame_us > 2'000'000) {
+    s_window = now;
+    s_frames = 0;
+    s_over = 0;
+    s_worst_us = 0;
+    return;
+  }
+
+  ++s_frames;
+  s_worst_us = std::max(s_worst_us, frame_us);
+  if (frame_us >= 50'000) {
+    ++s_over;
+  }
+  const auto elapsed = now - s_window;
+  if (elapsed < std::chrono::seconds(period)) {
+    return;
+  }
+  const double seconds = std::chrono::duration<double>(elapsed).count();
+  REXLOG_INFO("frame-time: {:.0f}s frames={} fps={:.1f} worst={}ms over50ms={}", seconds,
+              s_frames, double(s_frames) / seconds, s_worst_us / 1000, s_over);
+  s_window = now;
+  s_frames = 0;
+  s_over = 0;
+  s_worst_us = 0;
+}
+
 void OnFrameEnd(uint8_t* base) {
   PaceGuestFrame();
+  RecordFrameTime();
   // EMULATED-mode guest frame breakdown (emulated gameplay once regressed
   // from 140 to 66 fps while native stayed at cap; the native-scene perf
   // line only prints while the native renderer is active, so emulated
